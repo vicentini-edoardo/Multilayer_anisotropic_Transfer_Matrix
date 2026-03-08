@@ -1,0 +1,52 @@
+[theme]
+font = "'Space Grotesk':https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+headingFont = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseFontSize = 15
+baseFontWeight = 400
+codeFontSize = "13px"
+linkUnderline = false
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "10px"
+buttonRadius = "10px"
+
+[theme.light]
+primaryColor = "#1274d9"
+backgroundColor = "#f5f8fc"
+secondaryBackgroundColor = "#e9f0f8"
+textColor = "#122033"
+linkColor = "#1274d9"
+codeTextColor = "#10243a"
+codeBackgroundColor = "#e6eef7"
+borderColor = "#bfd0e5"
+dataframeBorderColor = "#bfd0e5"
+dataframeHeaderBackgroundColor = "#e6eef7"
+
+[theme.dark]
+primaryColor = "#45a2ff"
+backgroundColor = "#0a111b"
+secondaryBackgroundColor = "#121c2a"
+textColor = "#d7e5f8"
+linkColor = "#67b4ff"
+codeTextColor = "#d8e6fa"
+codeBackgroundColor = "#0e1724"
+borderColor = "#2c405a"
+dataframeBorderColor = "#2c405a"
+dataframeHeaderBackgroundColor = "#132236"
+
+[theme.light.sidebar]
+backgroundColor = "#e9f0f8"
+secondaryBackgroundColor = "#dfe8f3"
+codeBackgroundColor = "#dce6f2"
+textColor = "#112338"
+borderColor = "#bfd0e5"
+primaryColor = "#1274d9"
+
+[theme.dark.sidebar]
+backgroundColor = "#0d1826"
+secondaryBackgroundColor = "#132338"
+codeBackgroundColor = "#0f1c2c"
+textColor = "#d7e5f8"
+borderColor = "#2c405a"
+primaryColor = "#45a2ff"

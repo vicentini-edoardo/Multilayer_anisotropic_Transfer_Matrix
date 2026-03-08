@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+title: "Multilayer anisotropic transfer matrix"
+message: "If you use this software, please cite the repository and the underlying scientific work."
+type: software
+authors:
+  - family-names: "Vicentini"
+    given-names: "Edoardo"
+    affiliation: "CIC nanoGUNE"
+license: "MIT"
+preferred-citation:
+  type: article
+  authors:
+    - family-names: "Passler"
+      given-names: "N. C."
+    - family-names: "Paarmann"
+      given-names: "A."
+  title: "Generalized 4 × 4 matrix formalism for light propagation in anisotropic stratified media: study of surface phonon polaritons in polar dielectric heterostructures"
+  journal: "Journal of the Optical Society of America B"
+  volume: 34
+  issue: 10
+  start: 2128
+  year: 2017
+  doi: "10.1364/JOSAB.34.002128"
