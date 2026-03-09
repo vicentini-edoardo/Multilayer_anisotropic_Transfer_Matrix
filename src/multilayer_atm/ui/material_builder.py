@@ -145,6 +145,21 @@ def _capture_imported_definition() -> None:
     st.session_state[CUSTOM_MATERIAL_DIALOG_IMPORT_DIGEST_KEY] = digest
 
 
+def _render_axis_equation_preview(axis_label: str, source_type: str) -> None:
+    """Show the epsilon model used by the current axis source."""
+    if source_type == "Weak Lorentz":
+        st.caption("Model preview")
+        st.latex(
+            rf"{axis_label}(\omega) = \varepsilon_{{\infty}} + \sum_j \frac{{S_j \,\omega_{{0,j}}^2}}{{\omega_{{0,j}}^2 - \omega^2 - i\,\gamma_j\,\omega}}"
+        )
+        return
+    if source_type == "Strong Lorentz":
+        st.caption("Model preview")
+        st.latex(
+            rf"{axis_label}(\omega) = \varepsilon_{{\infty}} \prod_j \frac{{\omega_{{LO,j}}^2 - \omega^2 - i\,\gamma_j\,\omega}}{{\omega_{{TO,j}}^2 - \omega^2 - i\,\gamma_j\,\omega}}"
+        )
+
+
 def _render_axis_definition_editor(axis_name: str) -> None:
     axis_label = f"ε{axis_name}"
     source_key = _dialog_key(f"{axis_name}_source_type")
@@ -153,12 +168,13 @@ def _render_axis_definition_editor(axis_name: str) -> None:
         ["Weak Lorentz", "Strong Lorentz", "TXT import"],
         key=source_key,
     )
+    _render_axis_equation_preview(axis_label, source_type)
 
     if source_type == "Weak Lorentz":
         eps_inf = st.number_input(f"{axis_label} εinf", min_value=0.0, step=0.1, key=_dialog_key(f"{axis_name}_weak_lorentz_eps_inf"))
         count = int(
             st.number_input(
-                f"{axis_label} weak oscillators",
+                "Number of oscillators",
                 min_value=1,
                 max_value=6,
                 step=1,
@@ -177,7 +193,7 @@ def _render_axis_definition_editor(axis_name: str) -> None:
         eps_inf = st.number_input(f"{axis_label} εinf", min_value=0.0, step=0.1, key=_dialog_key(f"{axis_name}_strong_lorentz_eps_inf"))
         count = int(
             st.number_input(
-                f"{axis_label} strong oscillators",
+                "Number of oscillators",
                 min_value=1,
                 max_value=6,
                 step=1,
@@ -198,6 +214,7 @@ def _render_axis_definition_editor(axis_name: str) -> None:
         key=_dialog_key(f"{axis_name}_table_upload"),
         help="Three columns: frequency (cm^-1), Re(eps), Im(eps).",
     )
+    st.caption("TXT format: one row per frequency, with three numeric columns in this order: frequency (cm⁻¹), Re(ε), Im(ε).")
     if uploaded is not None:
         digest = sha256(uploaded.getvalue()).hexdigest()
         hash_key = _dialog_key(f"{axis_name}_table_digest")
