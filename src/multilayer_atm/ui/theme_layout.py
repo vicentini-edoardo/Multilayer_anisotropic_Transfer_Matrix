@@ -75,7 +75,7 @@ html, body, [class*="css"], [data-testid="stAppViewContainer"] {
 
 .block-container {
     max-width: min(98vw, 1900px);
-    padding-top: 0.35rem;
+    padding-top: 3.4rem;
     padding-bottom: 0.45rem;
     padding-left: clamp(0.55rem, 1vw, 0.9rem);
     padding-right: clamp(0.55rem, 1vw, 0.9rem);
@@ -102,21 +102,23 @@ h1, h2, h3, h4, h5, h6 {
 
 .topbar {
     border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-    padding: 0.15rem 0 0.35rem 0;
+    padding: 0.22rem 0 0.42rem 0;
     margin-bottom: 0.3rem;
 }
 
 .topbar-title {
     margin: 0;
-    font-size: clamp(0.92rem, 1.25vw, 1.05rem);
-    line-height: 1.1;
-    font-weight: 600;
+    font-size: clamp(1.25rem, 2vw, 1.7rem);
+    line-height: 1.04;
+    font-weight: 700;
+    max-width: 18ch;
 }
 
 .topbar-subtitle {
-    margin: 0.08rem 0 0 0;
+    margin: 0.16rem 0 0 0;
     color: var(--ink-muted) !important;
-    font-size: 0.68rem;
+    font-size: 0.78rem;
+    font-weight: 500;
 }
 
 .section-label {
@@ -461,6 +463,7 @@ h1, h2, h3, h4, h5, h6 {
 
 @media (max-width: 980px) {
     .block-container {
+        padding-top: 2.8rem;
         padding-left: 0.55rem;
         padding-right: 0.55rem;
     }
@@ -477,7 +480,7 @@ def render_top_bar(status: Mapping[str, str]) -> None:
     left, right = st.columns([0.62, 0.38], gap="small", vertical_alignment="center")
     with left:
         st.markdown('<p class="topbar-title">Multilayer anisotropic transfer matrix</p>', unsafe_allow_html=True)
-        st.markdown('<p class="topbar-subtitle">Stack design, setup, and results.</p>', unsafe_allow_html=True)
+        st.markdown('<p class="topbar-subtitle">Developed by Edoardo Vicentini</p>', unsafe_allow_html=True)
     with right:
         badges = " ".join([_status_badge("Resolution", status.get("resolution", "Normal")), _status_badge("Workers", status.get("workers", "4"), tone="green")])
         st.markdown(badges)
