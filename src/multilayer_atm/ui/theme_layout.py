@@ -489,3 +489,10 @@ def render_footer() -> None:
     st.caption(
         "Units: w in cm⁻¹, kx UI in 10^3 cm⁻¹, boundary layers semi-infinite, Euler optional."
     )
+    st.caption(
+        "Reference: N. C. Passler and A. Paarmann, Journal of the Optical Society of America B 34, 2128 (2017), "
+        "DOI: https://doi.org/10.1364/JOSAB.34.002128"
+    )
+    st.caption(
+        "pyGTM repository: https://github.com/pyMatJ/pyGTM"
+    )

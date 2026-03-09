@@ -2,6 +2,8 @@
 
 A scientific Streamlit application for building multilayer optical stacks, assigning anisotropic material models, and exploring `Im(rpp)` dispersion and isofrequency maps with a pyGTM-based transfer-matrix solver.
 
+Live app: <https://multilayeranisotropictransfermatrix-ev.streamlit.app>
+
 ![Representative application overview](assets/figures/streamlit-workspace.png)
 
 ## Scientific context
@@ -45,6 +47,10 @@ streamlit run app.py
 ```
 
 The app is designed to work directly from a fresh clone. The root `app.py` adds the local `src/` directory to `sys.path`, so installation is not required to launch the Streamlit interface after dependencies are installed.
+
+If you only want to use the public deployment, open:
+
+<https://multilayeranisotropictransfermatrix-ev.streamlit.app>
 
 ## Example usage
 
