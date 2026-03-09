@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Mapping, Tuple
 
 import numpy as np
 
@@ -18,6 +18,7 @@ except Exception as exc:  # pragma: no cover - exercised by runtime environment 
     ) from exc
 
 from .models import DopingSpec
+from .custom_materials import build_custom_axes
 
 
 C_LIGHT = 299_792_458.0
@@ -174,9 +175,17 @@ def _with_doping(
     return _eps
 
 
-def axes_for_material(material: str, doping: DopingSpec | None = None) -> MaterialAxes:
+def axes_for_material(
+    material: str,
+    doping: DopingSpec | None = None,
+    custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
+) -> MaterialAxes:
     """Return the anisotropic permittivity model for a supported material."""
-    base = _base_axes(material)
+    if custom_materials and material in custom_materials:
+        fx, fy, fz, note = build_custom_axes(custom_materials[material])
+        base = MaterialAxes(fx=fx, fy=fy, fz=fz, note=note)
+    else:
+        base = _base_axes(material)
     doping = doping or DopingSpec()
     return MaterialAxes(
         fx=_with_doping(base.fx, doping),

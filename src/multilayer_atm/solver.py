@@ -5,7 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 import os
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -65,24 +65,24 @@ def _default_workers() -> int:
     return max(1, min(4, cpu))
 
 
-def _build_system(stack_spec: StackSpec) -> GTM.System:
+def _build_system(stack_spec: StackSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> GTM.System:
     stack = stack_spec.enforce_boundary_layers()
     system = GTM.System()
 
     layers = list(stack.layers)
-    super_layer = _build_layer(layers[0])
-    sub_layer = _build_layer(layers[-1])
+    super_layer = _build_layer(layers[0], custom_materials=custom_materials)
+    sub_layer = _build_layer(layers[-1], custom_materials=custom_materials)
     system.set_superstrate(super_layer)
     system.set_substrate(sub_layer)
 
     for mid in layers[1:-1]:
-        system.add_layer(_build_layer(mid))
+        system.add_layer(_build_layer(mid, custom_materials=custom_materials))
 
     return system
 
 
-def _build_layer(layer_spec: LayerSpec) -> GTM.Layer:
-    axes = axes_for_material(layer_spec.material, layer_spec.doping)
+def _build_layer(layer_spec: LayerSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> GTM.Layer:
+    axes = axes_for_material(layer_spec.material, layer_spec.doping, custom_materials=custom_materials)
     theta, phi, psi = passler_to_pygtm_euler(layer_spec.euler_deg)
     return GTM.Layer(
         thickness=float(layer_spec.thickness_m),
@@ -150,7 +150,7 @@ def _compute_row_with_system(system: GTM.System, w_cm1: float, kx_cm1: np.ndarra
     return row
 
 
-def _stack_to_worker_payload(stack_spec: StackSpec) -> Dict[str, object]:
+def _stack_to_worker_payload(stack_spec: StackSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> Dict[str, object]:
     return {
         "layers": [
             {
@@ -164,7 +164,8 @@ def _stack_to_worker_payload(stack_spec: StackSpec) -> Dict[str, object]:
                 },
             }
             for ls in stack_spec.layers
-        ]
+        ],
+        "custom_materials": dict(custom_materials or {}),
     }
 
 
@@ -187,7 +188,7 @@ def _get_worker_system(phi_offset_deg: float) -> GTM.System:
     stack = _deserialize_stack(_WORKER_STACK_PAYLOAD)
     if key != 0.0:
         stack = stack.with_interior_alpha_offset(key)
-    system = _build_system(stack)
+    system = _build_system(stack, custom_materials=_WORKER_STACK_PAYLOAD.get("custom_materials", {}))
     _WORKER_SYSTEM_CACHE[key] = system
     return system
 
@@ -232,9 +233,10 @@ def _run_parallel_rows(
     workers: int,
     progress: ProgressCallback,
     progress_label: str,
+    custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> np.ndarray:
     out = np.empty((len(w_values_cm1), len(kx_values_cm1)), dtype=np.complex128)
-    payload = _stack_to_worker_payload(stack_spec)
+    payload = _stack_to_worker_payload(stack_spec, custom_materials=custom_materials)
     kx_array = np.asarray(kx_values_cm1, dtype=float)
 
     if progress:
@@ -265,7 +267,7 @@ def _run_parallel_rows(
             system = system_cache.get(phi_off)
             if system is None:
                 local_stack = stack_spec.with_interior_alpha_offset(phi_off) if phi_off != 0.0 else stack_spec
-                system = _build_system(local_stack)
+                system = _build_system(local_stack, custom_materials=payload.get("custom_materials", {}))
                 system_cache[phi_off] = system
             out[i, :] = _compute_row_with_system(system, w, kx_array)
             if progress:
@@ -290,6 +292,7 @@ def compute_rpp_map(
     nk: int,
     workers: Optional[int] = None,
     progress: ProgressCallback = None,
+    custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute Im(rpp) on a regular dispersion grid in (w, kx)."""
     stack = stack_spec.enforce_boundary_layers()
@@ -310,9 +313,10 @@ def compute_rpp_map(
             workers=workers,
             progress=progress,
             progress_label="Computing Im(rpp)(w,kx)",
+            custom_materials=custom_materials,
         )
     else:
-        system = _build_system(stack)
+        system = _build_system(stack, custom_materials=custom_materials)
         rpp = np.empty((len(w_values), len(kx_values)), dtype=np.complex128)
         for i, w in enumerate(w_values):
             rpp[i, :] = _compute_row_with_system(system, float(w), kx_values)
@@ -332,6 +336,7 @@ def compute_isofreq_map(
     global_phi_sweep: bool = True,
     workers: Optional[int] = None,
     progress: ProgressCallback = None,
+    custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute Im(rpp) on a regular isofrequency grid in (phi, kx)."""
     stack = stack_spec.enforce_boundary_layers()
@@ -355,12 +360,13 @@ def compute_isofreq_map(
             workers=workers,
             progress=progress,
             progress_label="Computing isofrequency Im(rpp)(phi,kx)",
+            custom_materials=custom_materials,
         )
     else:
         rpp = np.empty((len(phi_values), len(kx_values)), dtype=np.complex128)
         for i, phi_deg in enumerate(phi_offsets_deg):
             local_stack = stack.with_interior_alpha_offset(float(phi_deg)) if global_phi_sweep else stack
-            system = _build_system(local_stack)
+            system = _build_system(local_stack, custom_materials=custom_materials)
             rpp[i, :] = _compute_row_with_system(system, float(w0), kx_values)
             if progress:
                 progress((i + 1) / len(phi_values), f"Computing isofrequency Im(rpp): {i + 1}/{len(phi_values)} angles")

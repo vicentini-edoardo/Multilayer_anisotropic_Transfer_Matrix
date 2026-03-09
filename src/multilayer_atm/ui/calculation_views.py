@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
 
+from ..custom_materials import material_frequency_range_warnings
 from ..plotting import (
     plot_heatmap,
     plot_heatmap_interactive,
@@ -21,6 +22,7 @@ from ..plotting import (
 )
 from ..solver import compute_isofreq_map, compute_rpp_map
 from .layer_builder import build_stack_from_session
+from .material_builder import custom_material_registry
 from .theme_layout import single_choice
 from ..models import StackSpec
 
@@ -32,6 +34,9 @@ FAST_PREVIEW_MAX_X = 220
 FAST_PREVIEW_MAX_Y = 220
 FAST_PREVIEW_MAX_R = 220
 FAST_PREVIEW_MAX_PHI = 220
+ISO_DEFAULT_W0 = 900.0
+ISO_DEFAULT_KX_MIN = 0.5
+ISO_DEFAULT_KX_MAX = 25.0
 PLOTLY_CONFIG = {
     "displaylogo": False,
     "scrollZoom": True,
@@ -48,10 +53,10 @@ ComputeResultT = TypeVar("ComputeResultT")
 
 CALC_UI_STATE_KEYS = (
     "calc_mode",
-    "speed_preset_choice",
+    "map_resolution_choice",
+    "iso_resolution_choice",
     "worker_count",
     "fast_preview_plots",
-    "advanced_euler_enabled",
     "plot_colormap",
     "show_peak_dots",
     "peak_dot_threshold_percent",
@@ -68,14 +73,14 @@ CALC_UI_STATE_KEYS = (
     "iso_kx_max",
 )
 
-def _initial_calc_defaults(speed_presets: Mapping[str, Mapping[str, int]]) -> Dict[str, Any]:
+def _initial_calc_defaults(speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]]) -> Dict[str, Any]:
     default_preset = "Normal" if "Normal" in speed_presets else next(iter(speed_presets))
     return {
         "calc_mode": "Im(rpp) as f(w, kx)",
-        "speed_preset_choice": default_preset,
+        "map_resolution_choice": default_preset,
+        "iso_resolution_choice": default_preset,
         "worker_count": 4,
         "fast_preview_plots": True,
-        "advanced_euler_enabled": False,
         "plot_colormap": "Magma",
         "show_peak_dots": True,
         "peak_dot_threshold_percent": 10.0,
@@ -90,31 +95,34 @@ def _initial_calc_defaults(speed_presets: Mapping[str, Mapping[str, int]]) -> Di
             "map": {
                 "w_min": 780.0,
                 "w_max": 1050.0,
-                "nw": int(speed_presets[default_preset]["nw"]),
+                "nw": int(speed_presets[default_preset]["map"]["nw"]),
                 "kx_min": 0.05,
                 "kx_max": 15.0,
-                "nk": int(speed_presets[default_preset]["nk"]),
+                "nk": int(speed_presets[default_preset]["map"]["nk"]),
+                "resolution": default_preset,
             },
             "iso": {
-                "w0": 500.0,
-                "nk": int(speed_presets[default_preset]["nk"]),
-                "nphi": int(speed_presets[default_preset]["nphi"]),
-                "kx_min": 0.05,
-                "kx_max": 15.0,
+                "w0": ISO_DEFAULT_W0,
+                "nk": int(speed_presets[default_preset]["iso"]["nk"]),
+                "nphi": int(speed_presets[default_preset]["iso"]["nphi"]),
+                "kx_min": ISO_DEFAULT_KX_MIN,
+                "kx_max": ISO_DEFAULT_KX_MAX,
+                "resolution": default_preset,
             },
         },
         "map_w_min": 780.0,
         "map_w_max": 1050.0,
-        "map_nw": int(speed_presets[default_preset]["nw"]),
+        "map_nw": int(speed_presets[default_preset]["map"]["nw"]),
         "map_kx_min": 0.05,
         "map_kx_max": 15.0,
-        "map_nk": int(speed_presets[default_preset]["nk"]),
-        "iso_w0": 500.0,
-        "iso_nk": int(speed_presets[default_preset]["nk"]),
-        "iso_nphi": int(speed_presets[default_preset]["nphi"]),
-        "iso_kx_min": 0.05,
-        "iso_kx_max": 15.0,
-        "last_applied_speed_preset": default_preset,
+        "map_nk": int(speed_presets[default_preset]["map"]["nk"]),
+        "iso_w0": ISO_DEFAULT_W0,
+        "iso_nk": int(speed_presets[default_preset]["iso"]["nk"]),
+        "iso_nphi": int(speed_presets[default_preset]["iso"]["nphi"]),
+        "iso_kx_min": ISO_DEFAULT_KX_MIN,
+        "iso_kx_max": ISO_DEFAULT_KX_MAX,
+        "last_applied_map_resolution": default_preset,
+        "last_applied_iso_resolution": default_preset,
     }
 
 
@@ -122,7 +130,76 @@ def _calc_ui_state_snapshot() -> Dict[str, Any]:
     return {key: st.session_state[key] for key in CALC_UI_STATE_KEYS if key in st.session_state}
 
 
-def init_calculation_state(speed_presets: Mapping[str, Mapping[str, int]]) -> None:
+def _preserve_calc_ui_state() -> None:
+    """Copy calculation UI values out of widget-backed state before a mode-switch rerun."""
+    st.session_state["_calc_ui_state_mirror"] = _calc_ui_state_snapshot()
+
+
+def _sync_numeric_widget(state_key: str, widget_key: str) -> None:
+    st.session_state[state_key] = st.session_state[widget_key]
+
+
+def _stateful_number_input(label: str, state_key: str, widget_key: str, **kwargs: Any) -> None:
+    """Render a numeric widget whose visible key is decoupled from the persistent state key."""
+    st.session_state[widget_key] = st.session_state.get(state_key)
+    st.number_input(
+        label,
+        key=widget_key,
+        on_change=_sync_numeric_widget,
+        args=(state_key, widget_key),
+        **kwargs,
+    )
+
+
+def _repair_iso_defaults_if_invalid() -> None:
+    """Restore isofrequency defaults when stale widget state revives invalid zero values."""
+    if float(st.session_state.get("iso_w0", 0.0)) <= 0.0:
+        st.session_state.iso_w0 = ISO_DEFAULT_W0
+    if float(st.session_state.get("iso_kx_max", 0.0)) <= 0.0:
+        st.session_state.iso_kx_max = ISO_DEFAULT_KX_MAX
+    if float(st.session_state.get("iso_kx_min", 0.0)) < 0.0:
+        st.session_state.iso_kx_min = ISO_DEFAULT_KX_MIN
+    if (
+        float(st.session_state.get("iso_kx_min", ISO_DEFAULT_KX_MIN)) == 0.0
+        and float(st.session_state.get("iso_kx_max", ISO_DEFAULT_KX_MAX)) == ISO_DEFAULT_KX_MAX
+    ):
+        st.session_state.iso_kx_min = ISO_DEFAULT_KX_MIN
+    if float(st.session_state.get("iso_kx_max", ISO_DEFAULT_KX_MAX)) <= float(st.session_state.get("iso_kx_min", 0.0)):
+        st.session_state.iso_kx_max = ISO_DEFAULT_KX_MAX
+
+
+def _handle_calc_mode_change() -> None:
+    """Persist live fields before switching modes and repair stale zeroed isofrequency defaults."""
+    _preserve_calc_ui_state()
+    if str(st.session_state.get("calc_mode")) == "Isofrequency surface":
+        _repair_iso_defaults_if_invalid()
+
+
+def _normalize_legacy_iso_defaults(speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]]) -> None:
+    """Repair stale pre-refactor isofrequency state that can survive across Streamlit reruns."""
+    iso_w0 = float(st.session_state.get("iso_w0", 0.0))
+    iso_kx_min = float(st.session_state.get("iso_kx_min", 0.0))
+    iso_kx_max = float(st.session_state.get("iso_kx_max", 0.0))
+    iso_nk = int(st.session_state.get("iso_nk", 0))
+    iso_nphi = int(st.session_state.get("iso_nphi", 0))
+    default_resolution = str(st.session_state.get("iso_resolution_choice", "Normal"))
+    default_resolution = default_resolution if default_resolution in speed_presets else "Normal"
+    invalid_zero_state = (
+        iso_w0 <= 0.0
+        and iso_kx_min == 0.0
+        and iso_kx_max <= 0.0
+        and iso_nk <= 0
+        and iso_nphi <= 0
+    )
+    if not invalid_zero_state:
+        return
+    st.session_state.iso_w0 = ISO_DEFAULT_W0
+    st.session_state.iso_kx_min = ISO_DEFAULT_KX_MIN
+    st.session_state.iso_kx_max = ISO_DEFAULT_KX_MAX
+    _apply_iso_resolution(default_resolution, speed_presets)
+
+
+def init_calculation_state(speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]]) -> None:
     """Initialize persistent calculation settings and restore them across reruns."""
     defaults = _initial_calc_defaults(speed_presets)
     preserved_state = st.session_state.pop("_preserved_calc_state", None) or {}
@@ -133,10 +210,16 @@ def init_calculation_state(speed_presets: Mapping[str, Mapping[str, int]]) -> No
         if key not in st.session_state:
             st.session_state[key] = restored_state.get(key, default_value)
 
-    if st.session_state.get("speed_preset_choice") not in speed_presets:
-        st.session_state.speed_preset_choice = str(defaults["speed_preset_choice"])
+    valid_resolution_choices = set(speed_presets) | {"Custom"}
+    if st.session_state.get("map_resolution_choice") not in valid_resolution_choices:
+        st.session_state.map_resolution_choice = str(defaults["map_resolution_choice"])
+    if st.session_state.get("iso_resolution_choice") not in valid_resolution_choices:
+        st.session_state.iso_resolution_choice = str(defaults["iso_resolution_choice"])
     if st.session_state.get("calc_mode") not in ("Im(rpp) as f(w, kx)", "Isofrequency surface"):
         st.session_state.calc_mode = str(defaults["calc_mode"])
+
+    _normalize_legacy_iso_defaults(speed_presets)
+    _sync_resolution_defaults(speed_presets)
 
     st.session_state["_calc_ui_state_mirror"] = _calc_ui_state_snapshot()
 
@@ -155,13 +238,13 @@ def _build_export_txt(
     data: np.ndarray,
     columns: List[str],
     workers: int,
-    preset_name: str,
+    resolution_name: str,
 ) -> bytes:
     buffer = StringIO()
     now = datetime.now(timezone.utc).isoformat()
     buffer.write(f"# exported_utc: {now}\n")
     buffer.write(f"# mode: {mode}\n")
-    buffer.write(f"# preset: {preset_name}\n")
+    buffer.write(f"# resolution: {resolution_name}\n")
     buffer.write(f"# workers: {workers}\n")
     buffer.write("# units: rpp=Im(rpp), kx=cm^-1, w=cm^-1, phi=rad\n")
     buffer.write(f"# rows: {data.shape[0]}\n")
@@ -209,7 +292,7 @@ def _figure_png_bytes(fig: Any) -> bytes:
     return png_bytes
 
 
-def _dispersion_export_bytes(im_rpp: np.ndarray, kxv_cm1: np.ndarray, wv_cm1: np.ndarray, workers: int, speed_name: str) -> bytes:
+def _dispersion_export_bytes(im_rpp: np.ndarray, kxv_cm1: np.ndarray, wv_cm1: np.ndarray, workers: int, resolution_name: str) -> bytes:
     kx_grid, w_grid = np.meshgrid(np.asarray(kxv_cm1, dtype=float), np.asarray(wv_cm1, dtype=float), indexing="xy")
     data = np.column_stack(
         [
@@ -225,7 +308,7 @@ def _dispersion_export_bytes(im_rpp: np.ndarray, kxv_cm1: np.ndarray, wv_cm1: np
         data=data,
         columns=["rpp", "kx", "w"],
         workers=workers,
-        preset_name=speed_name,
+        resolution_name=resolution_name,
     )
 
 
@@ -235,7 +318,7 @@ def _isofrequency_export_bytes(
     phiv_rad: np.ndarray,
     w0_cm1: float,
     workers: int,
-    speed_name: str,
+    resolution_name: str,
 ) -> bytes:
     kx_grid, phi_grid = np.meshgrid(np.asarray(kxv_cm1, dtype=float), np.asarray(phiv_rad, dtype=float), indexing="xy")
     w_grid = np.full_like(kx_grid, float(w0_cm1), dtype=float)
@@ -254,7 +337,7 @@ def _isofrequency_export_bytes(
         data=data,
         columns=["rpp", "kx", "w", "phi"],
         workers=workers,
-        preset_name=speed_name,
+        resolution_name=resolution_name,
     )
 
 
@@ -348,30 +431,68 @@ def _render_validation_errors(errors: List[str]) -> None:
         st.caption(f":red[• {message}]")
 
 
-def _sync_preset_defaults(preset_name: str, speed_presets: Mapping[str, Mapping[str, int]]) -> None:
-    if st.session_state.get("last_applied_speed_preset") == preset_name:
-        return
-    preset = speed_presets[preset_name]
+def _resolution_choices(speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]]) -> List[str]:
+    return [*speed_presets.keys(), "Custom"]
+
+
+def _apply_map_resolution(resolution_name: str, speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]]) -> None:
+    preset = speed_presets[resolution_name]["map"]
     st.session_state.map_nw = int(preset["nw"])
     st.session_state.map_nk = int(preset["nk"])
+    st.session_state.last_applied_map_resolution = resolution_name
+
+
+def _apply_iso_resolution(resolution_name: str, speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]]) -> None:
+    preset = speed_presets[resolution_name]["iso"]
     st.session_state.iso_nk = int(preset["nk"])
     st.session_state.iso_nphi = int(preset["nphi"])
-    st.session_state.last_applied_speed_preset = preset_name
+    st.session_state.last_applied_iso_resolution = resolution_name
 
 
-def _apply_selected_speed_preset(speed_presets: Mapping[str, Mapping[str, int]]) -> None:
-    preset_name = str(st.session_state.get("speed_preset_choice", "Normal"))
-    _sync_preset_defaults(preset_name, speed_presets)
+def _sync_resolution_defaults(speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]]) -> None:
+    map_resolution = str(st.session_state.get("map_resolution_choice", "Normal"))
+    if map_resolution in speed_presets:
+        map_preset = speed_presets[map_resolution]["map"]
+        if st.session_state.get("last_applied_map_resolution") != map_resolution:
+            _apply_map_resolution(map_resolution, speed_presets)
+        elif (
+            int(st.session_state.get("map_nw", map_preset["nw"])) != int(map_preset["nw"])
+            or int(st.session_state.get("map_nk", map_preset["nk"])) != int(map_preset["nk"])
+        ):
+            st.session_state.map_resolution_choice = "Custom"
+            st.session_state.last_applied_map_resolution = "Custom"
+    else:
+        st.session_state.last_applied_map_resolution = "Custom"
+
+    iso_resolution = str(st.session_state.get("iso_resolution_choice", "Normal"))
+    if iso_resolution in speed_presets:
+        iso_preset = speed_presets[iso_resolution]["iso"]
+        if st.session_state.get("last_applied_iso_resolution") != iso_resolution:
+            _apply_iso_resolution(iso_resolution, speed_presets)
+        elif (
+            int(st.session_state.get("iso_nk", iso_preset["nk"])) != int(iso_preset["nk"])
+            or int(st.session_state.get("iso_nphi", iso_preset["nphi"])) != int(iso_preset["nphi"])
+        ):
+            st.session_state.iso_resolution_choice = "Custom"
+            st.session_state.last_applied_iso_resolution = "Custom"
+    else:
+        st.session_state.last_applied_iso_resolution = "Custom"
+
+
+def _active_resolution_choice(mode: str | None = None) -> str:
+    active_mode = mode or str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
+    if active_mode == "Isofrequency surface":
+        return str(st.session_state.get("iso_resolution_choice", "Normal"))
+    return str(st.session_state.get("map_resolution_choice", "Normal"))
 
 
 def _current_calc_settings() -> Dict[str, Any]:
     mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
     settings = {
         "mode": mode,
-        "speed_name": str(st.session_state.get("speed_preset_choice", "Normal")),
+        "resolution": _active_resolution_choice(mode),
         "workers": int(st.session_state.get("worker_count", 4)),
         "fast_preview_plots": bool(st.session_state.get("fast_preview_plots", True)),
-        "advanced_euler_enabled": bool(st.session_state.get("advanced_euler_enabled", False)),
     }
     if mode == "Im(rpp) as f(w, kx)":
         settings["params"] = {
@@ -384,11 +505,11 @@ def _current_calc_settings() -> Dict[str, Any]:
         }
     else:
         settings["params"] = {
-            "w0": float(st.session_state.get("iso_w0", 500.0)),
-            "nk": int(st.session_state.get("iso_nk", 180)),
-            "nphi": int(st.session_state.get("iso_nphi", 180)),
-            "kx_min": float(st.session_state.get("iso_kx_min", 0.05)),
-            "kx_max": float(st.session_state.get("iso_kx_max", 15.0)),
+            "w0": float(st.session_state.get("iso_w0", ISO_DEFAULT_W0)),
+            "nk": int(st.session_state.get("iso_nk", 128)),
+            "nphi": int(st.session_state.get("iso_nphi", 128)),
+            "kx_min": float(st.session_state.get("iso_kx_min", ISO_DEFAULT_KX_MIN)),
+            "kx_max": float(st.session_state.get("iso_kx_max", ISO_DEFAULT_KX_MAX)),
         }
     return settings
 
@@ -423,7 +544,7 @@ def workspace_status() -> Dict[str, str]:
     freshness = "Current" if _results_are_current() else "Stale"
     mode = "Im(rpp)" if st.session_state.get("calc_mode") == "Im(rpp) as f(w, kx)" else "Isofrequency"
     return {
-        "preset": str(st.session_state.get("speed_preset_choice", "Normal")),
+        "resolution": _active_resolution_choice(),
         "workers": str(st.session_state.get("worker_count", 4)),
         "mode": mode,
         "compute_state": compute_state,
@@ -444,13 +565,15 @@ def _store_compute_snapshot(mode: str) -> None:
             "kx_min": float(st.session_state.get("map_kx_min", 0.05)),
             "kx_max": float(st.session_state.get("map_kx_max", 15.0)),
             "nk": int(st.session_state.get("map_nk", 180)),
+            "resolution": str(st.session_state.get("map_resolution_choice", "Normal")),
         },
         "iso": {
-            "w0": float(st.session_state.get("iso_w0", 500.0)),
-            "nk": int(st.session_state.get("iso_nk", 180)),
-            "nphi": int(st.session_state.get("iso_nphi", 180)),
-            "kx_min": float(st.session_state.get("iso_kx_min", 0.05)),
-            "kx_max": float(st.session_state.get("iso_kx_max", 15.0)),
+            "w0": float(st.session_state.get("iso_w0", ISO_DEFAULT_W0)),
+            "nk": int(st.session_state.get("iso_nk", 128)),
+            "nphi": int(st.session_state.get("iso_nphi", 128)),
+            "kx_min": float(st.session_state.get("iso_kx_min", ISO_DEFAULT_KX_MIN)),
+            "kx_max": float(st.session_state.get("iso_kx_max", ISO_DEFAULT_KX_MAX)),
+            "resolution": str(st.session_state.get("iso_resolution_choice", "Normal")),
         },
     }
 
@@ -541,34 +664,54 @@ def _peak_overlay_for_iso(phi_rad: np.ndarray, kx_ui: np.ndarray, im_rpp: np.nda
     }
 
 
-def _render_map_compute_form(speed_name: str, workers: int) -> None:
-    with st.form("map_form", border=False):
-        with st.container():
-            st.markdown('<p class="section-label">Range and sampling</p>', unsafe_allow_html=True)
-            freq_cols = st.columns(2, gap="small")
-            freq_cols[0].number_input("w min (cm⁻¹)", step=10.0, key="map_w_min")
-            freq_cols[1].number_input("w max (cm⁻¹)", step=10.0, key="map_w_max")
+def _render_map_compute_form(speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]], workers: int) -> None:
+    with st.container():
+        st.markdown('<p class="section-label">Range and sampling</p>', unsafe_allow_html=True)
+        freq_cols = st.columns(2, gap="small")
+        with freq_cols[0]:
+            _stateful_number_input("w min (cm⁻¹)", "map_w_min", "map_w_min_widget", step=10.0)
+        with freq_cols[1]:
+            _stateful_number_input("w max (cm⁻¹)", "map_w_max", "map_w_max_widget", step=10.0)
 
-            mom_cols = st.columns(2, gap="small")
-            mom_cols[0].number_input("kx min (10^3 cm⁻¹)", step=0.05, format="%.3f", key="map_kx_min")
-            mom_cols[1].number_input("kx max (10^3 cm⁻¹)", step=0.1, format="%.3f", key="map_kx_max")
-            sample_cols = st.columns(2, gap="small")
-            sample_cols[0].number_input("Nw", min_value=8, step=8, key="map_nw")
-            sample_cols[1].number_input("Nk", min_value=8, step=8, key="map_nk")
-
-        errors = validate_map_inputs(
-            w_min=float(st.session_state.map_w_min),
-            w_max=float(st.session_state.map_w_max),
-            nw=int(st.session_state.map_nw),
-            kx_min=float(st.session_state.map_kx_min),
-            kx_max=float(st.session_state.map_kx_max),
-            nk=int(st.session_state.map_nk),
+        mom_cols = st.columns(2, gap="small")
+        with mom_cols[0]:
+            _stateful_number_input("kx min (10^3 cm⁻¹)", "map_kx_min", "map_kx_min_widget", step=0.05, format="%.3f")
+        with mom_cols[1]:
+            _stateful_number_input("kx max (10^3 cm⁻¹)", "map_kx_max", "map_kx_max_widget", step=0.1, format="%.3f")
+        st.selectbox(
+            "Resolution",
+            _resolution_choices(speed_presets),
+            key="map_resolution_choice",
         )
-        grid_points = int(st.session_state.map_nw) * int(st.session_state.map_nk)
+        map_custom = str(st.session_state.get("map_resolution_choice", "Normal")) == "Custom"
+        sample_cols = st.columns(2, gap="small")
+        with sample_cols[0]:
+            _stateful_number_input("Nw", "map_nw", "map_nw_widget", min_value=8, step=8, disabled=not map_custom)
+        with sample_cols[1]:
+            _stateful_number_input("Nk", "map_nk", "map_nk_widget", min_value=8, step=8, disabled=not map_custom)
+
+    errors = validate_map_inputs(
+        w_min=float(st.session_state.map_w_min),
+        w_max=float(st.session_state.map_w_max),
+        nw=int(st.session_state.map_nw),
+        kx_min=float(st.session_state.map_kx_min),
+        kx_max=float(st.session_state.map_kx_max),
+        nk=int(st.session_state.map_nk),
+    )
+    range_warnings = material_frequency_range_warnings(
+        [layer.material for layer in build_stack_from_session().layers],
+        custom_material_registry(),
+        w_min_cm1=float(st.session_state.map_w_min),
+        w_max_cm1=float(st.session_state.map_w_max),
+    )
+    grid_points = int(st.session_state.map_nw) * int(st.session_state.map_nk)
+    with st.form("map_form", border=False):
         with st.container():
             st.markdown('<p class="section-label">Compute summary</p>', unsafe_allow_html=True)
             st.caption(f"Grid: {grid_points:,} points")
             st.caption(f"Cost: {_estimated_cost_label(grid_points, workers)} on {workers} workers")
+            for warning in range_warnings:
+                st.warning(warning, icon=":material/warning:")
             _render_validation_errors(errors)
             run_map = st.form_submit_button(
                 ":material/play_arrow: Compute Im(rpp) map",
@@ -593,37 +736,58 @@ def _render_map_compute_form(speed_name: str, workers: int) -> None:
                 nk=int(st.session_state.map_nk),
                 workers=int(workers),
                 progress=progress_cb,
+                custom_materials=custom_material_registry(),
             ),
         )
         st.session_state.map_result = (wv, kxv, im_rpp)
         _store_compute_snapshot("Im(rpp) as f(w, kx)")
 
 
-def _render_iso_compute_form(speed_name: str, workers: int) -> None:
-    with st.form("iso_form", border=False):
-        with st.container():
-            st.markdown('<p class="section-label">Range and sampling</p>', unsafe_allow_html=True)
-            freq_cols = st.columns(3, gap="small")
-            freq_cols[0].number_input("w0 (cm⁻¹)", step=5.0, key="iso_w0")
-            freq_cols[1].number_input("Nk", min_value=8, step=8, key="iso_nk")
-            freq_cols[2].number_input("Nphi", min_value=8, step=8, key="iso_nphi")
+def _render_iso_compute_form(speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]], workers: int) -> None:
+    with st.container():
+        st.markdown('<p class="section-label">Range and sampling</p>', unsafe_allow_html=True)
+        freq_cols = st.columns(1, gap="small")
+        with freq_cols[0]:
+            _stateful_number_input("w0 (cm⁻¹)", "iso_w0", "iso_w0_widget", step=5.0)
 
-            mom_cols = st.columns(2, gap="small")
-            mom_cols[0].number_input("kx min (10^3 cm⁻¹)", step=0.05, format="%.3f", key="iso_kx_min")
-            mom_cols[1].number_input("kx max (10^3 cm⁻¹)", step=0.1, format="%.3f", key="iso_kx_max")
-
-        errors = validate_iso_inputs(
-            w0=float(st.session_state.iso_w0),
-            kx_min=float(st.session_state.iso_kx_min),
-            kx_max=float(st.session_state.iso_kx_max),
-            nk=int(st.session_state.iso_nk),
-            nphi=int(st.session_state.iso_nphi),
+        mom_cols = st.columns(2, gap="small")
+        with mom_cols[0]:
+            _stateful_number_input("kx min (10^3 cm⁻¹)", "iso_kx_min", "iso_kx_min_widget", step=0.05, format="%.3f")
+        with mom_cols[1]:
+            _stateful_number_input("kx max (10^3 cm⁻¹)", "iso_kx_max", "iso_kx_max_widget", step=0.1, format="%.3f")
+        st.selectbox(
+            "Resolution",
+            _resolution_choices(speed_presets),
+            key="iso_resolution_choice",
         )
-        grid_points = int(st.session_state.iso_nk) * int(st.session_state.iso_nphi)
+        iso_custom = str(st.session_state.get("iso_resolution_choice", "Normal")) == "Custom"
+        sample_cols = st.columns(2, gap="small")
+        with sample_cols[0]:
+            _stateful_number_input("Nk", "iso_nk", "iso_nk_widget", min_value=8, step=8, disabled=not iso_custom)
+        with sample_cols[1]:
+            _stateful_number_input("Nphi", "iso_nphi", "iso_nphi_widget", min_value=8, step=8, disabled=not iso_custom)
+
+    errors = validate_iso_inputs(
+        w0=float(st.session_state.iso_w0),
+        kx_min=float(st.session_state.iso_kx_min),
+        kx_max=float(st.session_state.iso_kx_max),
+        nk=int(st.session_state.iso_nk),
+        nphi=int(st.session_state.iso_nphi),
+    )
+    range_warnings = material_frequency_range_warnings(
+        [layer.material for layer in build_stack_from_session().layers],
+        custom_material_registry(),
+        w_min_cm1=float(st.session_state.iso_w0),
+        w_max_cm1=float(st.session_state.iso_w0),
+    )
+    grid_points = int(st.session_state.iso_nk) * int(st.session_state.iso_nphi)
+    with st.form("iso_form", border=False):
         with st.container():
             st.markdown('<p class="section-label">Compute summary</p>', unsafe_allow_html=True)
             st.caption(f"Grid: {grid_points:,} points")
             st.caption(f"Cost: {_estimated_cost_label(grid_points, workers)} on {workers} workers")
+            for warning in range_warnings:
+                st.warning(warning, icon=":material/warning:")
             _render_validation_errors(errors)
             run_iso = st.form_submit_button(
                 ":material/play_arrow: Compute isofrequency Im(rpp)",
@@ -648,15 +812,16 @@ def _render_iso_compute_form(speed_name: str, workers: int) -> None:
                 global_phi_sweep=True,
                 workers=int(workers),
                 progress=progress_cb,
+                custom_materials=custom_material_registry(),
             ),
         )
         st.session_state.iso_result = (phiv, kxv, im_rpp)
         _store_compute_snapshot("Isofrequency surface")
 
 
-def render_calculation_panel(speed_presets: Mapping[str, Mapping[str, int]]) -> None:
+def render_calculation_panel(speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]]) -> None:
     """Render the calculation-setup column for both supported computation modes."""
-    speed_name = str(st.session_state.get("speed_preset_choice", "Normal"))
+    _sync_resolution_defaults(speed_presets)
     workers = int(st.session_state.get("worker_count", 4))
 
     st.markdown('<p class="section-label">Calculation setup</p>', unsafe_allow_html=True)
@@ -670,27 +835,19 @@ def render_calculation_panel(speed_presets: Mapping[str, Mapping[str, int]]) -> 
             ["Im(rpp) as f(w, kx)", "Isofrequency surface"],
             str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)")),
             "calc_mode",
+            on_change=_handle_calc_mode_change,
         )
         ctx_cols = st.columns(2, gap="small")
-        ctx_cols[0].selectbox(
-            "Preset",
-            list(speed_presets.keys()),
-            key="speed_preset_choice",
-            on_change=_apply_selected_speed_preset,
-            args=(speed_presets,),
-        )
-        ctx_cols[1].caption(f"Workers: {int(st.session_state.get('worker_count', 4))}")
+        ctx_cols[0].slider("CPU workers", min_value=1, max_value=16, step=1, key="worker_count")
+        ctx_cols[1].caption(f"Resolution: {_active_resolution_choice()}")
         st.toggle("Preview plots", key="fast_preview_plots", help="Downsamples only the displayed plot. Computation stays full resolution.")
-        with st.expander("Advanced", expanded=bool(st.session_state.get("advanced_euler_enabled", False)), icon=":material/tune:"):
-            st.slider("CPU workers", min_value=1, max_value=16, step=1, key="worker_count")
-            st.toggle("Enable advanced Euler (α/β/γ)", key="advanced_euler_enabled")
 
-    speed_name = str(st.session_state.get("speed_preset_choice", "Normal"))
     workers = int(st.session_state.get("worker_count", 4))
     if st.session_state.calc_mode == "Im(rpp) as f(w, kx)":
-        _render_map_compute_form(speed_name=speed_name, workers=workers)
+        _render_map_compute_form(speed_presets=speed_presets, workers=workers)
     else:
-        _render_iso_compute_form(speed_name=speed_name, workers=workers)
+        _repair_iso_defaults_if_invalid()
+        _render_iso_compute_form(speed_presets=speed_presets, workers=workers)
 
     # Mirror the live calculation UI so unrelated reruns can restore the current mode and sampling values.
     st.session_state["_calc_ui_state_mirror"] = _calc_ui_state_snapshot()
@@ -753,12 +910,12 @@ def _render_plot_toolbar(
                 st.button(":material/download: Export data", width="stretch", disabled=True)
 
 
-def _current_export_payload(speed_name: str, workers: int) -> tuple[bytes | None, str | None]:
+def _current_export_payload(resolution_name: str, workers: int) -> tuple[bytes | None, str | None]:
     mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
     if mode == "Im(rpp) as f(w, kx)" and st.session_state.map_result is not None:
         wv, kxv, im_rpp = st.session_state.map_result
         return (
-            _dispersion_export_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv, workers=workers, speed_name=speed_name),
+            _dispersion_export_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv, workers=workers, resolution_name=resolution_name),
             f"{_stack_plot_filename_stem('dispersion-rpp-export')}.txt",
         )
     if mode == "Isofrequency surface" and st.session_state.iso_result is not None:
@@ -768,9 +925,9 @@ def _current_export_payload(speed_name: str, workers: int) -> tuple[bytes | None
                 im_rpp=im_rpp,
                 kxv_cm1=kxv,
                 phiv_rad=phiv,
-                w0_cm1=float(st.session_state.get("iso_w0", 500.0)),
+                w0_cm1=float(st.session_state.get("iso_w0", 900.0)),
                 workers=workers,
-                speed_name=speed_name,
+                resolution_name=resolution_name,
             ),
             f"{_stack_plot_filename_stem('isofrequency-rpp-export')}.txt",
         )
@@ -794,7 +951,7 @@ def _current_plot_image_payload() -> tuple[bytes | None, str | None]:
     return None, None
 
 
-def _render_map_plot(speed_name: str, workers: int) -> bytes | None:
+def _render_map_plot(resolution_name: str, workers: int) -> bytes | None:
     if st.session_state.map_result is None:
         st.caption(":material/analytics: Run the computation to show the map.")
         return None
@@ -834,10 +991,10 @@ def _render_map_plot(speed_name: str, workers: int) -> bytes | None:
         config=PLOTLY_CONFIG,
         key=f"map_plot_{st.session_state.get('plot_refresh_nonce', 0)}",
     )
-    return _dispersion_export_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv, workers=workers, speed_name=speed_name)
+    return _dispersion_export_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv, workers=workers, resolution_name=resolution_name)
 
 
-def _render_iso_plot(speed_name: str, workers: int) -> bytes | None:
+def _render_iso_plot(resolution_name: str, workers: int) -> bytes | None:
     if st.session_state.iso_result is None:
         st.caption(":material/radar: Run the computation to show the surface.")
         return None
@@ -880,9 +1037,9 @@ def _render_iso_plot(speed_name: str, workers: int) -> bytes | None:
         im_rpp=im_rpp,
         kxv_cm1=kxv,
         phiv_rad=phiv,
-        w0_cm1=float(st.session_state.get("iso_w0", 500.0)),
+        w0_cm1=float(st.session_state.get("iso_w0", 900.0)),
         workers=workers,
-        speed_name=speed_name,
+        resolution_name=resolution_name,
     )
 
 
@@ -909,11 +1066,11 @@ def _render_metadata_tab() -> None:
     )
 
 
-def _render_export_tab(speed_name: str, workers: int) -> None:
+def _render_export_tab(resolution_name: str, workers: int) -> None:
     mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
     if mode == "Im(rpp) as f(w, kx)" and st.session_state.map_result is not None:
         wv, kxv, im_rpp = st.session_state.map_result
-        export_bytes = _dispersion_export_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv, workers=workers, speed_name=speed_name)
+        export_bytes = _dispersion_export_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv, workers=workers, resolution_name=resolution_name)
         image_bytes = _dispersion_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv)
         st.download_button(
             "Download dispersion export",
@@ -935,9 +1092,9 @@ def _render_export_tab(speed_name: str, workers: int) -> None:
             im_rpp=im_rpp,
             kxv_cm1=kxv,
             phiv_rad=phiv,
-            w0_cm1=float(st.session_state.get("iso_w0", 500.0)),
+            w0_cm1=float(st.session_state.get("iso_w0", 900.0)),
             workers=workers,
-            speed_name=speed_name,
+            resolution_name=resolution_name,
         )
         image_bytes = _isofrequency_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, phiv_rad=phiv)
         st.download_button(
@@ -960,7 +1117,7 @@ def _render_export_tab(speed_name: str, workers: int) -> None:
 
 def render_results_panel() -> None:
     """Render the main plot, status tabs, and export actions."""
-    speed_name = str(st.session_state.get("speed_preset_choice", "Normal"))
+    resolution_name = _active_resolution_choice()
     workers = int(st.session_state.get("worker_count", 4))
     mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
 
@@ -971,7 +1128,7 @@ def render_results_panel() -> None:
         has_result = (mode == "Im(rpp) as f(w, kx)" and st.session_state.map_result is not None) or (
             mode == "Isofrequency surface" and st.session_state.iso_result is not None
         )
-        export_bytes, export_name = _current_export_payload(speed_name=speed_name, workers=workers)
+        export_bytes, export_name = _current_export_payload(resolution_name=resolution_name, workers=workers)
         image_bytes, image_name = _current_plot_image_payload()
         _render_plot_toolbar(
             has_result=has_result,
@@ -982,9 +1139,9 @@ def render_results_panel() -> None:
         )
     with st.container(border=True):
         if mode == "Im(rpp) as f(w, kx)":
-            export_bytes = _render_map_plot(speed_name=speed_name, workers=workers)
+            export_bytes = _render_map_plot(resolution_name=resolution_name, workers=workers)
         else:
-            export_bytes = _render_iso_plot(speed_name=speed_name, workers=workers)
+            export_bytes = _render_iso_plot(resolution_name=resolution_name, workers=workers)
 
     tab_result, tab_stack, tab_meta, tab_export = st.tabs(["Status", "Preview", "Metadata", "Export"])
     with tab_result:
@@ -999,4 +1156,4 @@ def render_results_panel() -> None:
     with tab_meta:
         _render_metadata_tab()
     with tab_export:
-        _render_export_tab(speed_name=speed_name, workers=workers)
+        _render_export_tab(resolution_name=resolution_name, workers=workers)

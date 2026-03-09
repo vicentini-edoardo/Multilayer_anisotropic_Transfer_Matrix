@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import streamlit as st
 
@@ -16,7 +16,14 @@ def configure_page() -> None:
     )
 
 
-def single_choice(label: str, options: Sequence[str], default: str, key: str) -> str:
+def single_choice(
+    label: str,
+    options: Sequence[str],
+    default: str,
+    key: str,
+    on_change: Any | None = None,
+    args: Sequence[Any] | None = None,
+) -> str:
     """Render a single-choice control with stable keyed state across reruns."""
     options_list = list(options)
     resolved_default = default if default in options_list else options_list[0]
@@ -24,9 +31,9 @@ def single_choice(label: str, options: Sequence[str], default: str, key: str) ->
     if current_value not in options_list:
         st.session_state[key] = resolved_default
     if hasattr(st, "segmented_control"):
-        selected = st.segmented_control(label, options_list, key=key)
+        selected = st.segmented_control(label, options_list, key=key, on_change=on_change, args=args)
         return str(selected if selected is not None else st.session_state[key])
-    return str(st.radio(label, options_list, horizontal=True, key=key))
+    return str(st.radio(label, options_list, horizontal=True, key=key, on_change=on_change, args=args))
 
 
 def _status_badge(label: str, value: str, tone: str = "blue") -> str:
@@ -472,7 +479,7 @@ def render_top_bar(status: Mapping[str, str]) -> None:
         st.markdown('<p class="topbar-title">Multilayer anisotropic transfer matrix</p>', unsafe_allow_html=True)
         st.markdown('<p class="topbar-subtitle">Stack design, setup, and results.</p>', unsafe_allow_html=True)
     with right:
-        badges = " ".join([_status_badge("Preset", status.get("preset", "Normal")), _status_badge("Workers", status.get("workers", "4"), tone="green")])
+        badges = " ".join([_status_badge("Resolution", status.get("resolution", "Normal")), _status_badge("Workers", status.get("workers", "4"), tone="green")])
         st.markdown(badges)
         stale_class = "current" if status.get("freshness") == "Current" else "stale"
         st.markdown(
@@ -487,7 +494,7 @@ def render_top_bar(status: Mapping[str, str]) -> None:
 def render_footer() -> None:
     """Render a compact scientific-units footer for the workspace."""
     st.caption(
-        "Units: w in cm⁻¹, kx UI in 10^3 cm⁻¹, boundary layers semi-infinite, Euler optional."
+        "Units: w in cm⁻¹, kx UI in 10^3 cm⁻¹, boundary layers semi-infinite, Euler angles per layer."
     )
     st.caption(
         "Reference: N. C. Passler and A. Paarmann, Journal of the Optical Society of America B 34, 2128 (2017), "

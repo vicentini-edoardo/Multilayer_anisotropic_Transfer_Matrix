@@ -6,10 +6,19 @@ from copy import deepcopy
 from typing import Dict, List
 
 
-SPEED_PRESETS: dict[str, dict[str, int]] = {
-    "Coarse": {"nw": 80, "nk": 100, "nphi": 100},
-    "Normal": {"nw": 160, "nk": 180, "nphi": 180},
-    "Fine": {"nw": 260, "nk": 280, "nphi": 280},
+SPEED_PRESETS: dict[str, dict[str, dict[str, int]]] = {
+    "Coarse": {
+        "map": {"nw": 80, "nk": 100},
+        "iso": {"nk": 64, "nphi": 64},
+    },
+    "Normal": {
+        "map": {"nw": 160, "nk": 180},
+        "iso": {"nk": 128, "nphi": 128},
+    },
+    "Fine": {
+        "map": {"nw": 260, "nk": 280},
+        "iso": {"nk": 256, "nphi": 128},
+    },
 }
 
 

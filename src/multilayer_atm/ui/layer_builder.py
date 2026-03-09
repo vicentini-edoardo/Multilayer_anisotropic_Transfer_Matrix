@@ -10,6 +10,14 @@ import streamlit as st
 from ..models import DopingSpec, LayerSpec, StackSpec
 from ..plotting import plot_stack_pseudo3d
 from ..presets import default_layer_stack, example_layer_stack
+from .material_builder import (
+    custom_material_notes,
+    handle_material_selection_change,
+    init_custom_material_state,
+    material_selector_options,
+    material_selection_callback_args,
+    maybe_open_custom_material_dialog,
+)
 
 
 LAYER_WIDGET_KEY_PREFIXES: Sequence[str] = (
@@ -22,7 +30,6 @@ LAYER_WIDGET_KEY_PREFIXES: Sequence[str] = (
     "a_",
     "b_",
     "g_",
-    "arel_",
     "dop_",
     "wp_",
     "gp_",
@@ -30,10 +37,10 @@ LAYER_WIDGET_KEY_PREFIXES: Sequence[str] = (
 
 CALC_STATE_KEYS_TO_PRESERVE: Sequence[str] = (
     "calc_mode",
-    "speed_preset_choice",
+    "map_resolution_choice",
+    "iso_resolution_choice",
     "worker_count",
     "fast_preview_plots",
-    "advanced_euler_enabled",
     "plot_colormap",
     "show_peak_dots",
     "peak_dot_threshold_percent",
@@ -69,9 +76,9 @@ def _new_layer(material: str = "vac", thickness_m: float = 0.5e-6) -> Dict[str, 
 
 def init_layer_state() -> None:
     """Initialize per-session stack editor state."""
+    init_custom_material_state()
     st.session_state.setdefault("layer_seq", 2)
     st.session_state.setdefault("layers", default_layer_stack())
-    st.session_state.setdefault("advanced_euler_enabled", False)
     st.session_state.setdefault("selected_layer_id", None)
     for layer in st.session_state.layers:
         if "id" not in layer:
@@ -151,7 +158,7 @@ def _layer_role(index: int, total: int) -> str:
 
 def _layer_short_label(index: int, total: int, layer: Dict[str, object]) -> str:
     material = str(layer["material"])
-    alpha_deg = float(layer.get("alpha_rel_substrate_deg", layer.get("alpha", 0.0)))
+    alpha_deg = float(layer.get("alpha", layer.get("alpha_rel_substrate_deg", 0.0)))
     thickness_um = float(layer["thickness_m"]) * 1e6
     role = _layer_role(index, total)
     if index in (0, total - 1):
@@ -161,7 +168,6 @@ def _layer_short_label(index: int, total: int, layer: Dict[str, object]) -> str:
 
 def build_stack_from_session() -> StackSpec:
     """Translate the editable Streamlit session state into a validated stack model."""
-    advanced_euler_enabled = bool(st.session_state.get("advanced_euler_enabled", False))
     layers = []
     total = len(st.session_state.layers)
     for index, layer in enumerate(st.session_state.layers):
@@ -169,10 +175,8 @@ def build_stack_from_session() -> StackSpec:
         thickness = 0.0 if boundary else float(layer["thickness_m"])
         if boundary:
             euler = (0.0, 0.0, 0.0)
-        elif advanced_euler_enabled:
-            euler = (float(layer["alpha"]), float(layer["beta"]), float(layer["gamma"]))
         else:
-            euler = (float(layer.get("alpha_rel_substrate_deg", 0.0)), 0.0, 0.0)
+            euler = (float(layer["alpha"]), float(layer["beta"]), float(layer["gamma"]))
         layers.append(
             LayerSpec(
                 material=str(layer["material"]),
@@ -211,7 +215,7 @@ def _render_layer_row(index: int, total: int, layer: Dict[str, object], selected
     selected = layer_id == selected_id
     boundary = index in (0, total - 1)
     thickness_um = float(layer["thickness_m"]) * 1e6
-    alpha_deg = float(layer.get("alpha_rel_substrate_deg", layer.get("alpha", 0.0)))
+    alpha_deg = float(layer.get("alpha", layer.get("alpha_rel_substrate_deg", 0.0)))
     role = _layer_role(index, total)
     if index == 0:
         icon = ":material/north:"
@@ -260,9 +264,18 @@ def _render_layer_row(index: int, total: int, layer: Dict[str, object], selected
 def _sync_layer_from_widgets(layer: Dict[str, object], layer_id: str, boundary: bool, catalog: Sequence[str]) -> None:
     current_material = str(layer["material"])
     current_thickness_um = float(layer["thickness_m"]) * 1e6
-    current_alpha_rel = float(layer.get("alpha_rel_substrate_deg", layer.get("alpha", 0.0)))
-    material_key = _init_layer_widget_state(layer_id, "mat_", current_material if current_material in catalog else catalog[0])
-    layer["material"] = st.selectbox("Material", catalog, key=material_key)
+    selector_options = material_selector_options(catalog)
+    fallback_material = current_material if current_material in selector_options else selector_options[0]
+    material_key = _init_layer_widget_state(layer_id, "mat_", fallback_material)
+    st.selectbox(
+        "Material",
+        selector_options,
+        key=material_key,
+        on_change=handle_material_selection_change,
+        args=material_selection_callback_args(material_key, current_material),
+    )
+    maybe_open_custom_material_dialog(material_key, catalog)
+    layer["material"] = str(st.session_state.get(material_key, current_material))
 
     if boundary:
         st.caption("Semi-infinite boundary. Thickness and rotation remain fixed.")
@@ -281,42 +294,30 @@ def _sync_layer_from_widgets(layer: Dict[str, object], layer_id: str, boundary: 
         )
         layer["thickness_m"] = float(thickness_um) * 1e-6
 
-        if bool(st.session_state.get("advanced_euler_enabled", False)):
-            with st.expander("Euler rotation details", expanded=False, icon=":material/rotate_right:"):
-                col_a, col_b, col_g = st.columns(3)
-                alpha_key = _init_layer_widget_state(layer_id, "a_", float(layer["alpha"]))
-                beta_key = _init_layer_widget_state(layer_id, "b_", float(layer["beta"]))
-                gamma_key = _init_layer_widget_state(layer_id, "g_", float(layer["gamma"]))
-                alpha = col_a.number_input(
-                    "α (deg)",
-                    step=1.0,
-                    key=alpha_key,
-                )
-                beta = col_b.number_input(
-                    "β (deg)",
-                    step=1.0,
-                    key=beta_key,
-                )
-                gamma = col_g.number_input(
-                    "γ (deg)",
-                    step=1.0,
-                    key=gamma_key,
-                )
-                layer["alpha"] = alpha
-                layer["alpha_rel_substrate_deg"] = alpha
-                layer["beta"] = beta
-                layer["gamma"] = gamma
-        else:
-            alpha_rel_key = _init_layer_widget_state(layer_id, "arel_", current_alpha_rel)
-            alpha_rel = st.number_input(
-                "α relative to substrate (deg)",
-                step=1.0,
-                key=alpha_rel_key,
-            )
-            layer["alpha_rel_substrate_deg"] = alpha_rel
-            layer["alpha"] = alpha_rel
-            layer["beta"] = 0.0
-            layer["gamma"] = 0.0
+        st.caption("Euler angles (deg)")
+        col_a, col_b, col_g = st.columns(3)
+        alpha_key = _init_layer_widget_state(layer_id, "a_", float(layer["alpha"]))
+        beta_key = _init_layer_widget_state(layer_id, "b_", float(layer["beta"]))
+        gamma_key = _init_layer_widget_state(layer_id, "g_", float(layer["gamma"]))
+        alpha = col_a.number_input(
+            "α",
+            step=1.0,
+            key=alpha_key,
+        )
+        beta = col_b.number_input(
+            "β",
+            step=1.0,
+            key=beta_key,
+        )
+        gamma = col_g.number_input(
+            "γ",
+            step=1.0,
+            key=gamma_key,
+        )
+        layer["alpha"] = alpha
+        layer["alpha_rel_substrate_deg"] = alpha
+        layer["beta"] = beta
+        layer["gamma"] = gamma
 
     doping_key = _init_layer_widget_state(layer_id, "dop_", bool(layer["doping_enabled"]))
     with st.expander("Advanced material options", expanded=bool(layer.get("doping_enabled", False)), icon=":material/science:"):
@@ -375,7 +376,7 @@ def render_layer_settings(catalog: Sequence[str], notes: Mapping[str, str]) -> N
     st.markdown('<p class="section-label">Selected layer</p>', unsafe_allow_html=True)
     st.caption(_layer_short_label(selected_idx, total, selected_layer))
     _sync_layer_from_widgets(selected_layer, selected_id, boundary, catalog)
-    note = notes.get(str(selected_layer["material"]))
+    note = notes.get(str(selected_layer["material"])) or custom_material_notes().get(str(selected_layer["material"]))
     if note:
         st.caption(f"{selected_layer['material']}: {note}")
 
