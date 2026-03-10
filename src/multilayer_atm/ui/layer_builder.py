@@ -44,17 +44,8 @@ CALC_STATE_KEYS_TO_PRESERVE: Sequence[str] = (
     "plot_colormap",
     "show_peak_dots",
     "peak_dot_threshold_percent",
-    "map_w_min",
-    "map_w_max",
-    "map_nw",
-    "map_kx_min",
-    "map_kx_max",
-    "map_nk",
-    "iso_w0",
-    "iso_nk",
-    "iso_nphi",
-    "iso_kx_min",
-    "iso_kx_max",
+    "map_state",
+    "iso_state",
 )
 
 def _new_layer(material: str = "vac", thickness_m: float = 0.5e-6) -> Dict[str, object]:
@@ -220,11 +211,11 @@ def _render_layer_row(index: int, total: int, layer: Dict[str, object], selected
     if index == 0:
         icon = ":material/north:"
         primary_label = f"{icon} Superstrate  |  {layer['material']}"
-        secondary_label = "Semi-infinite boundary"
+        secondary_label = "Semi-inf"
     elif index == total - 1:
         icon = ":material/south:"
         primary_label = f"{icon} Substrate  |  {layer['material']}"
-        secondary_label = "Semi-infinite boundary"
+        secondary_label = "Semi-inf"
     else:
         icon = ":material/layers:"
         primary_label = f"{icon} Layer {index}  |  {layer['material']}"
@@ -233,7 +224,7 @@ def _render_layer_row(index: int, total: int, layer: Dict[str, object], selected
         secondary_label = f"{secondary_label}  |  α {alpha_deg:.1f}°"
     card_label = f"**{primary_label}**\n{secondary_label}"
 
-    action_cols = st.columns([0.82, 0.06, 0.06, 0.06], gap="small")
+    action_cols = st.columns([0.81, 0.063, 0.063, 0.064], gap="small")
     with action_cols[0]:
         if st.button(
             card_label,
@@ -246,15 +237,33 @@ def _render_layer_row(index: int, total: int, layer: Dict[str, object], selected
             st.rerun()
     if not boundary:
         with action_cols[1]:
-            if st.button(":material/arrow_upward:", key=layer_widget_key("move_up_", layer_id), width="stretch"):
+            if st.button(
+                "",
+                key=layer_widget_key("move_up_", layer_id),
+                width="stretch",
+                icon=":material/arrow_upward:",
+                help="Move layer up",
+            ):
                 st.session_state.selected_layer_id = layer_id
                 _move_selected_interior_layer(-1)
         with action_cols[2]:
-            if st.button(":material/arrow_downward:", key=layer_widget_key("move_down_", layer_id), width="stretch"):
+            if st.button(
+                "",
+                key=layer_widget_key("move_down_", layer_id),
+                width="stretch",
+                icon=":material/arrow_downward:",
+                help="Move layer down",
+            ):
                 st.session_state.selected_layer_id = layer_id
                 _move_selected_interior_layer(1)
         with action_cols[3]:
-            if st.button(":material/delete:", key=layer_widget_key("del_", layer_id), width="stretch"):
+            if st.button(
+                "",
+                key=layer_widget_key("del_", layer_id),
+                width="stretch",
+                icon=":material/delete:",
+                help="Delete layer",
+            ):
                 st.session_state.layers = [l for l in st.session_state.layers if str(l["id"]) != layer_id]
                 _ensure_selected_layer()
                 _preserve_calc_state_before_rerun()
@@ -278,7 +287,7 @@ def _sync_layer_from_widgets(layer: Dict[str, object], layer_id: str, boundary: 
     layer["material"] = str(st.session_state.get(material_key, current_material))
 
     if boundary:
-        st.caption("Semi-infinite boundary. Thickness and rotation remain fixed.")
+        st.caption("Semi-inf. Thickness and rotation remain fixed.")
         layer["thickness_m"] = 0.0
         layer["alpha_rel_substrate_deg"] = 0.0
         layer["alpha"] = 0.0
@@ -359,7 +368,7 @@ def _selected_layer() -> tuple[int, Dict[str, object]]:
 
 def render_stack_preview() -> None:
     """Render the pseudo-3D stack preview close to the layer editor."""
-    st.markdown('<p class="section-label">Stack preview</p>', unsafe_allow_html=True)
+    st.caption(":material/view_in_ar: Stack preview")
     stack_preview = build_stack_from_session()
     figure = plot_stack_pseudo3d(stack_preview)
     st.pyplot(figure, width="stretch", clear_figure=True)
@@ -373,8 +382,7 @@ def render_layer_settings(catalog: Sequence[str], notes: Mapping[str, str]) -> N
     selected_id = str(selected_layer["id"])
     boundary = selected_idx in (0, total - 1)
 
-    st.markdown('<p class="section-label">Selected layer</p>', unsafe_allow_html=True)
-    st.caption(_layer_short_label(selected_idx, total, selected_layer))
+    st.caption(f":material/tune: {_layer_short_label(selected_idx, total, selected_layer)}")
     _sync_layer_from_widgets(selected_layer, selected_id, boundary, catalog)
     note = notes.get(str(selected_layer["material"])) or custom_material_notes().get(str(selected_layer["material"]))
     if note:
@@ -386,34 +394,52 @@ def render_stack_panel(catalog: Sequence[str], notes: Mapping[str, str]) -> None
     _cleanup_layer_widget_state(str(layer["id"]) for layer in st.session_state.layers)
     _ensure_selected_layer()
 
-    st.markdown('<p class="section-label">Stack builder</p>', unsafe_allow_html=True)
-    st.subheader("Layer sequence", anchor=False)
-
+    st.subheader(":material/layers: Layer sequence", anchor=False)
     # Keep construction actions close to the sequence so stack edits and layer selection read as one workflow.
     with st.container(border=True):
-        st.markdown('<p class="section-label">Actions</p>', unsafe_allow_html=True)
-        action_cols = st.columns(3, gap="small")
-        with action_cols[0]:
-            if st.button(":material/add: Add layer", width="stretch"):
-                new_layer = _new_layer(material="vac", thickness_m=0.5e-6)
-                st.session_state.layers.insert(1, new_layer)
-                st.session_state.selected_layer_id = str(new_layer["id"])
-                _preserve_calc_state_before_rerun()
-                st.rerun()
-        with action_cols[1]:
-            if st.button(":material/science: Load example stack", width="stretch"):
-                st.session_state.layers = example_layer_stack()
-                st.session_state.layer_seq = 3
-                st.session_state.selected_layer_id = str(st.session_state.layers[1]["id"])
-                _preserve_calc_state_before_rerun()
-                st.rerun()
-        with action_cols[2]:
-            if st.button(":material/restart_alt: Reset defaults", width="stretch"):
-                st.session_state.layers = default_layer_stack()
-                st.session_state.layer_seq = 2
-                st.session_state.selected_layer_id = str(st.session_state.layers[0]["id"])
-                _preserve_calc_state_before_rerun()
-                st.rerun()
+        try:
+            with st.container(horizontal=True, horizontal_alignment="distribute"):
+                if st.button(":material/add: Add layer", width="stretch"):
+                    new_layer = _new_layer(material="vac", thickness_m=0.5e-6)
+                    st.session_state.layers.insert(1, new_layer)
+                    st.session_state.selected_layer_id = str(new_layer["id"])
+                    _preserve_calc_state_before_rerun()
+                    st.rerun()
+                if st.button(":material/science: Load example stack", width="stretch"):
+                    st.session_state.layers = example_layer_stack()
+                    st.session_state.layer_seq = 3
+                    st.session_state.selected_layer_id = str(st.session_state.layers[1]["id"])
+                    _preserve_calc_state_before_rerun()
+                    st.rerun()
+                if st.button(":material/restart_alt: Reset defaults", width="stretch"):
+                    st.session_state.layers = default_layer_stack()
+                    st.session_state.layer_seq = 2
+                    st.session_state.selected_layer_id = str(st.session_state.layers[0]["id"])
+                    _preserve_calc_state_before_rerun()
+                    st.rerun()
+        except TypeError:
+            action_cols = st.columns(3, gap="small")
+            with action_cols[0]:
+                if st.button(":material/add: Add layer", width="stretch"):
+                    new_layer = _new_layer(material="vac", thickness_m=0.5e-6)
+                    st.session_state.layers.insert(1, new_layer)
+                    st.session_state.selected_layer_id = str(new_layer["id"])
+                    _preserve_calc_state_before_rerun()
+                    st.rerun()
+            with action_cols[1]:
+                if st.button(":material/science: Load example stack", width="stretch"):
+                    st.session_state.layers = example_layer_stack()
+                    st.session_state.layer_seq = 3
+                    st.session_state.selected_layer_id = str(st.session_state.layers[1]["id"])
+                    _preserve_calc_state_before_rerun()
+                    st.rerun()
+            with action_cols[2]:
+                if st.button(":material/restart_alt: Reset defaults", width="stretch"):
+                    st.session_state.layers = default_layer_stack()
+                    st.session_state.layer_seq = 2
+                    st.session_state.selected_layer_id = str(st.session_state.layers[0]["id"])
+                    _preserve_calc_state_before_rerun()
+                    st.rerun()
 
         st.markdown('<div class="stack-sequence">', unsafe_allow_html=True)
         total = len(st.session_state.layers)

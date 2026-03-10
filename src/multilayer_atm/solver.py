@@ -333,6 +333,8 @@ def compute_isofreq_map(
     kx_max: float,
     nk: int,
     nphi: int,
+    phi_min_deg: float = 0.0,
+    phi_max_deg: float = 360.0,
     global_phi_sweep: bool = True,
     workers: Optional[int] = None,
     progress: ProgressCallback = None,
@@ -342,7 +344,8 @@ def compute_isofreq_map(
     stack = stack_spec.enforce_boundary_layers()
     stack.validate()
 
-    phi_values = np.linspace(0.0, 2.0 * np.pi, int(nphi), endpoint=False, dtype=float)
+    phi_values_deg = np.linspace(float(phi_min_deg), float(phi_max_deg), int(nphi), endpoint=False, dtype=float)
+    phi_values = np.deg2rad(phi_values_deg)
     kx_values = np.linspace(kx_min, kx_max, int(nk), dtype=float)
 
     if workers is None:

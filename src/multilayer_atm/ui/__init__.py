@@ -2,8 +2,9 @@
 
 from .calculation_views import (
     init_calculation_state,
-    render_calculation_panel,
+    render_mode_input_strip,
     render_results_panel,
+    render_run_controls_panel,
     validate_iso_inputs,
     validate_map_inputs,
     workspace_status,
@@ -16,10 +17,11 @@ __all__ = [
     "configure_page",
     "init_calculation_state",
     "init_layer_state",
-    "render_calculation_panel",
     "render_footer",
     "render_layer_settings",
+    "render_mode_input_strip",
     "render_results_panel",
+    "render_run_controls_panel",
     "render_stack_panel",
     "render_stack_preview",
     "render_top_bar",

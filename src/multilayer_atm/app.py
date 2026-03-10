@@ -6,7 +6,13 @@ import streamlit as st
 
 from .materials import material_catalog, material_notes
 from .presets import SPEED_PRESETS
-from .ui.calculation_views import init_calculation_state, render_calculation_panel, render_results_panel, workspace_status
+from .ui.calculation_views import (
+    init_calculation_state,
+    render_mode_input_strip,
+    render_results_panel,
+    render_run_controls_panel,
+    workspace_status,
+)
 from .ui.layer_builder import init_layer_state, render_stack_panel
 from .ui.theme_layout import apply_theme, configure_page, render_footer, render_top_bar
 
@@ -23,17 +29,23 @@ def run_app() -> None:
 
     render_top_bar(workspace_status())
 
-    # Keep the three core research tasks visible at once: build the stack,
-    # configure the calculation, and inspect the result.
-    stack_col, calc_col, results_col = st.columns([0.26, 0.30, 0.44], gap="small", vertical_alignment="top")
+    # Layout shell: compact left stack column + top/bottom center-right workspace.
+    stack_col, workspace_col = st.columns([0.32, 0.68], gap="small", vertical_alignment="top")
 
     with stack_col:
-        render_stack_panel(catalog=catalog, notes=notes)
+        with st.container(gap=None):
+            render_stack_panel(catalog=catalog, notes=notes)
 
-    with calc_col:
-        render_calculation_panel(speed_presets=SPEED_PRESETS)
+    with workspace_col:
+        st.subheader(":material/tune: Run controls", anchor=False)
+        with st.container(border=True):
+            top_row_left, top_row_right = st.columns([0.44, 0.56], gap="small", vertical_alignment="top")
+            with top_row_left:
+                render_run_controls_panel(speed_presets=SPEED_PRESETS)
+            with top_row_right:
+                render_mode_input_strip(speed_presets=SPEED_PRESETS)
 
-    with results_col:
-        render_results_panel()
+        with st.container(gap=None):
+            render_results_panel()
 
     render_footer()

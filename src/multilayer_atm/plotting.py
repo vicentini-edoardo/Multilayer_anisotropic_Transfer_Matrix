@@ -34,6 +34,31 @@ def _is_dark_mode() -> bool:
     return bool(getattr(theme_ctx, "base", "light") == "dark")
 
 
+def _plot_chrome() -> dict[str, str]:
+    """Return compact mode-aware UI colors used around rendered plots."""
+    if _is_dark_mode():
+        return {
+            "figure_bg": "#111a26",
+            "text": "#dbe5f1",
+            "edge_dark": "#3f536d",
+            "edge_light": "#5b7392",
+            "shade_target": "#0c1420",
+            "vacuum": "#85aacd",
+            "marker_fill": "#e3edf8",
+            "marker_edge": "#1f2c3d",
+        }
+    return {
+        "figure_bg": "#f7fafd",
+        "text": "#172534",
+        "edge_dark": "#4b6178",
+        "edge_light": "#364a62",
+        "shade_target": "#1f2c3d",
+        "vacuum": "#7da3c7",
+        "marker_fill": "#fcf7e3",
+        "marker_edge": "#2b3d51",
+    }
+
+
 def _rotate_uv(points: np.ndarray, alpha_deg: float) -> np.ndarray:
     ang = np.deg2rad(alpha_deg)
     rot = np.array([[np.cos(ang), -np.sin(ang)], [np.sin(ang), np.cos(ang)]], dtype=float)
@@ -74,11 +99,11 @@ def _project_points(points3d: np.ndarray, v_to_x: float, v_to_y: float) -> np.nd
     return out
 
 
-def _shade_side_color(base: str, normal: np.ndarray) -> tuple[float, float, float]:
+def _shade_side_color(base: str, normal: np.ndarray, shade_target: str) -> tuple[float, float, float]:
     light_dir = _normalize(np.array([0.34, -0.55, 1.0], dtype=float))
     lit = max(0.0, float(np.dot(normal, light_dir)))
     dark_weight = 0.46 - 0.24 * lit
-    return _mix_color(base, "#111827", dark_weight)
+    return _mix_color(base, shade_target, dark_weight)
 
 
 def _is_vacuum_material(material: str) -> bool:
@@ -100,13 +125,13 @@ def plot_stack_pseudo3d(stack: StackSpec) -> plt.Figure:
             tvals.append(max(layer.thickness_m * 1e6 * PSEUDO3D_INTERIOR_SCALE, PSEUDO3D_INTERIOR_MIN_UM))
     tvals_arr = np.asarray(tvals, dtype=float)
 
-    dark_mode = _is_dark_mode()
-    fig_bg = "#0f1724" if dark_mode else "#f7fbff"
-    fg = "#d7e5f8" if dark_mode else "#122033"
-    edge_dark = "#2a3d57" if dark_mode else "#183247"
-    edge_light = "#1d2d42" if dark_mode else "#1f2933"
+    chrome = _plot_chrome()
+    fig_bg = chrome["figure_bg"]
+    fg = chrome["text"]
+    edge_dark = chrome["edge_dark"]
+    edge_light = chrome["edge_light"]
 
-    fig, ax = plt.subplots(figsize=(6.5, 5.2), dpi=120)
+    fig, ax = plt.subplots(figsize=(6.1, 3.9), dpi=120)
     fig.patch.set_facecolor(fig_bg)
     ax.set_facecolor(fig_bg)
     half_width = 0.5
@@ -141,7 +166,7 @@ def plot_stack_pseudo3d(stack: StackSpec) -> plt.Figure:
         slab_center = np.array([0.5, 0.0, 0.5 * (z0 + z1)], dtype=float)
 
         is_vac = _is_vacuum_material(str(layer.material))
-        color = "#8fb8d8" if is_vac else PALETTE[stack_index % len(PALETTE)]
+        color = chrome["vacuum"] if is_vac else PALETTE[stack_index % len(PALETTE)]
         top_color = _mix_color(color, "#ffffff", 0.4 if is_vac else 0.25)
         faces3d = [
             (0, "top", _orient_face_outward(top3d.copy(), slab_center)),
@@ -159,7 +184,7 @@ def plot_stack_pseudo3d(stack: StackSpec) -> plt.Figure:
             projected = _project_points(face3d, v_to_x, v_to_y)
             projected_points.extend(projected)
             depth = float(np.dot(np.mean(face3d, axis=0), view_dir))
-            face_color = top_color if face_kind == "top" else _shade_side_color(color, normal)
+            face_color = top_color if face_kind == "top" else _shade_side_color(color, normal, chrome["shade_target"])
             face_priority = 1 if face_kind == "side" else 2
             faces_to_draw.append((slab_order, face_priority, depth, projected, face_color))
 
@@ -253,17 +278,24 @@ def plot_heatmap_interactive(
                 y=yy,
                 z=zz,
                 colorscale=cmap,
-                colorbar=dict(title="Im(rpp)"),
+                colorbar=dict(
+                    title="Im(rpp)",
+                    x=1.03,
+                    y=0.5,
+                    len=0.88,
+                    thickness=14,
+                ),
             )
         ]
     )
+    chrome = _plot_chrome()
     if peak_overlay is not None and len(peak_overlay.get("x", [])) > 0:
         fig.add_trace(
             go.Scatter(
                 x=np.asarray(peak_overlay["x"], dtype=float),
                 y=np.asarray(peak_overlay["y"], dtype=float),
                 mode="markers",
-                marker=dict(size=5, color="#fff7d6", line=dict(color="#1f2933", width=0.8)),
+                marker=dict(size=5, color=chrome["marker_fill"], line=dict(color=chrome["marker_edge"], width=0.8)),
                 name="Peak dots",
                 hovertemplate="w=%{y:.3f}<br>kx=%{x:.3f}<br>row max Im(rpp)=%{customdata:.4g}<extra></extra>",
                 customdata=np.asarray(peak_overlay["value"], dtype=float),
@@ -275,7 +307,7 @@ def plot_heatmap_interactive(
         yaxis_title=ylabel,
         template="plotly_dark" if _is_dark_mode() else "plotly_white",
         height=int(height),
-        margin=dict(l=20, r=20, t=55, b=20),
+        margin=dict(l=20, r=72, t=55, b=20),
     )
     return fig
 
@@ -372,7 +404,13 @@ def plot_polar_isofrequency_interactive(
                 marker=dict(
                     color=bar_color,
                     colorscale=cmap,
-                    colorbar=dict(title="Im(rpp)"),
+                    colorbar=dict(
+                        title="Im(rpp)",
+                        x=1.03,
+                        y=0.5,
+                        len=0.88,
+                        thickness=14,
+                    ),
                     line=dict(width=0),
                 ),
                 base=bar_base,
@@ -381,13 +419,14 @@ def plot_polar_isofrequency_interactive(
             )
         ]
     )
+    chrome = _plot_chrome()
     if peak_overlay is not None and len(peak_overlay.get("r", [])) > 0:
         fig.add_trace(
             go.Scatterpolar(
                 r=np.asarray(peak_overlay["r"], dtype=float),
                 theta=np.asarray(peak_overlay["theta_deg"], dtype=float),
                 mode="markers",
-                marker=dict(size=5, color="#fff7d6", line=dict(color="#1f2933", width=0.8)),
+                marker=dict(size=5, color=chrome["marker_fill"], line=dict(color=chrome["marker_edge"], width=0.8)),
                 name="Peak dots",
                 customdata=np.asarray(peak_overlay["value"], dtype=float),
                 hovertemplate="phi=%{theta:.1f} deg<br>kx=%{r:.3f}<br>row max Im(rpp)=%{customdata:.4g}<extra></extra>",
@@ -397,7 +436,7 @@ def plot_polar_isofrequency_interactive(
         title=title,
         template="plotly_dark" if _is_dark_mode() else "plotly_white",
         height=int(height),
-        margin=dict(l=20, r=20, t=55, b=20),
+        margin=dict(l=20, r=72, t=55, b=20),
         polar=dict(
             radialaxis=dict(range=[0.0, float(radius.max())], title=radial_label),
             angularaxis=dict(direction="counterclockwise", rotation=0),
