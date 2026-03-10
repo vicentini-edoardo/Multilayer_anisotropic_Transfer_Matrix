@@ -48,7 +48,7 @@ CALC_STATE_KEYS_TO_PRESERVE: Sequence[str] = (
     "iso_state",
 )
 
-def _new_layer(material: str = "vac", thickness_m: float = 0.5e-6) -> Dict[str, object]:
+def _new_layer(material: str = "vac", thickness_m: float = 0.1e-6) -> Dict[str, object]:
     layer_id = f"layer_{st.session_state.layer_seq}"
     st.session_state.layer_seq += 1
     return {
@@ -59,7 +59,7 @@ def _new_layer(material: str = "vac", thickness_m: float = 0.5e-6) -> Dict[str, 
         "alpha": 0.0,
         "beta": 0.0,
         "gamma": 0.0,
-        "doping_enabled": False,
+        "doping_enabled": True,
         "wp_cm1": 0.0,
         "gp_cm1": 0.0,
     }
@@ -79,7 +79,7 @@ def init_layer_state() -> None:
         layer.setdefault("alpha", float(layer.get("alpha_rel_substrate_deg", 0.0)))
         layer.setdefault("beta", 0.0)
         layer.setdefault("gamma", 0.0)
-        layer.setdefault("doping_enabled", False)
+        layer["doping_enabled"] = True
         layer.setdefault("wp_cm1", 0.0)
         layer.setdefault("gp_cm1", 0.0)
 
@@ -150,11 +150,11 @@ def _layer_role(index: int, total: int) -> str:
 def _layer_short_label(index: int, total: int, layer: Dict[str, object]) -> str:
     material = str(layer["material"])
     alpha_deg = float(layer.get("alpha", layer.get("alpha_rel_substrate_deg", 0.0)))
-    thickness_um = float(layer["thickness_m"]) * 1e6
+    thickness_nm = float(layer["thickness_m"]) * 1e9
     role = _layer_role(index, total)
     if index in (0, total - 1):
         return f"{role} • {material} • α {alpha_deg:.1f}°"
-    return f"{role} • {material} • {thickness_um:.3f} µm • α {alpha_deg:.1f}°"
+    return f"{role} • {material} • {thickness_nm:.1f} nm • α {alpha_deg:.1f}°"
 
 
 def build_stack_from_session() -> StackSpec:
@@ -205,7 +205,7 @@ def _render_layer_row(index: int, total: int, layer: Dict[str, object], selected
     layer_id = str(layer["id"])
     selected = layer_id == selected_id
     boundary = index in (0, total - 1)
-    thickness_um = float(layer["thickness_m"]) * 1e6
+    thickness_nm = float(layer["thickness_m"]) * 1e9
     alpha_deg = float(layer.get("alpha", layer.get("alpha_rel_substrate_deg", 0.0)))
     role = _layer_role(index, total)
     if index == 0:
@@ -219,12 +219,12 @@ def _render_layer_row(index: int, total: int, layer: Dict[str, object], selected
     else:
         icon = ":material/layers:"
         primary_label = f"{icon} Layer {index}  |  {layer['material']}"
-        secondary_label = f"{thickness_um:.3f} µm  |  α {alpha_deg:.1f}°"
+        secondary_label = f"{thickness_nm:.1f} nm  |  α {alpha_deg:.1f}°"
     if boundary:
         secondary_label = f"{secondary_label}  |  α {alpha_deg:.1f}°"
     card_label = f"**{primary_label}**\n{secondary_label}"
 
-    action_cols = st.columns([0.81, 0.063, 0.063, 0.064], gap="small")
+    action_cols = st.columns([0.81, 0.063, 0.063, 0.064], gap=None)
     with action_cols[0]:
         if st.button(
             card_label,
@@ -272,7 +272,7 @@ def _render_layer_row(index: int, total: int, layer: Dict[str, object], selected
 
 def _sync_layer_from_widgets(layer: Dict[str, object], layer_id: str, boundary: bool, catalog: Sequence[str]) -> None:
     current_material = str(layer["material"])
-    current_thickness_um = float(layer["thickness_m"]) * 1e6
+    current_thickness_nm = float(layer["thickness_m"]) * 1e9
     selector_options = material_selector_options(catalog)
     fallback_material = current_material if current_material in selector_options else selector_options[0]
     material_key = _init_layer_widget_state(layer_id, "mat_", fallback_material)
@@ -294,17 +294,17 @@ def _sync_layer_from_widgets(layer: Dict[str, object], layer_id: str, boundary: 
         layer["beta"] = 0.0
         layer["gamma"] = 0.0
     else:
-        thickness_key = _init_layer_widget_state(layer_id, "thk_", current_thickness_um)
-        thickness_um = st.number_input(
-            "Thickness (µm)",
+        thickness_key = _init_layer_widget_state(layer_id, "thk_", current_thickness_nm)
+        thickness_nm = st.number_input(
+            "Thickness (nm)",
             min_value=0.0,
-            step=0.05,
+            step=10.0,
             key=thickness_key,
         )
-        layer["thickness_m"] = float(thickness_um) * 1e-6
+        layer["thickness_m"] = float(thickness_nm) * 1e-9
 
         st.caption("Euler angles (deg)")
-        col_a, col_b, col_g = st.columns(3)
+        col_a, col_b, col_g = st.columns(3, gap=None)
         alpha_key = _init_layer_widget_state(layer_id, "a_", float(layer["alpha"]))
         beta_key = _init_layer_widget_state(layer_id, "b_", float(layer["beta"]))
         gamma_key = _init_layer_widget_state(layer_id, "g_", float(layer["gamma"]))
@@ -328,34 +328,24 @@ def _sync_layer_from_widgets(layer: Dict[str, object], layer_id: str, boundary: 
         layer["beta"] = beta
         layer["gamma"] = gamma
 
-    doping_key = _init_layer_widget_state(layer_id, "dop_", bool(layer["doping_enabled"]))
-    with st.expander("Advanced material options", expanded=bool(layer.get("doping_enabled", False)), icon=":material/science:"):
-        if boundary:
-            st.caption("Drude doping is available for semi-infinite boundary media.")
-        dop = st.toggle(
-            "Enable Drude doping",
-            key=doping_key,
-        )
-        layer["doping_enabled"] = dop
-        if dop:
-            wp_key = _init_layer_widget_state(layer_id, "wp_", float(layer["wp_cm1"]))
-            gp_key = _init_layer_widget_state(layer_id, "gp_", float(layer["gp_cm1"]))
-            col_wp, col_gp = st.columns(2)
-            layer["wp_cm1"] = col_wp.number_input(
-                "wp (cm⁻¹)",
-                min_value=0.0,
-                step=10.0,
-                key=wp_key,
-            )
-            layer["gp_cm1"] = col_gp.number_input(
-                "Gp (cm⁻¹)",
-                min_value=0.0,
-                step=1.0,
-                key=gp_key,
-            )
-        else:
-            layer["wp_cm1"] = 0.0
-            layer["gp_cm1"] = 0.0
+    if boundary:
+        st.caption("Drude doping parameters")
+    wp_key = _init_layer_widget_state(layer_id, "wp_", float(layer["wp_cm1"]))
+    gp_key = _init_layer_widget_state(layer_id, "gp_", float(layer["gp_cm1"]))
+    col_wp, col_gp = st.columns(2, gap=None)
+    layer["wp_cm1"] = col_wp.number_input(
+        "wp (cm⁻¹)",
+        min_value=0.0,
+        step=10.0,
+        key=wp_key,
+    )
+    layer["gp_cm1"] = col_gp.number_input(
+        "Gp (cm⁻¹)",
+        min_value=0.0,
+        step=1.0,
+        key=gp_key,
+    )
+    layer["doping_enabled"] = True
 
     return
 
@@ -382,25 +372,25 @@ def render_layer_settings(catalog: Sequence[str], notes: Mapping[str, str]) -> N
     selected_id = str(selected_layer["id"])
     boundary = selected_idx in (0, total - 1)
 
-    st.caption(f":material/tune: {_layer_short_label(selected_idx, total, selected_layer)}")
     _sync_layer_from_widgets(selected_layer, selected_id, boundary, catalog)
     note = notes.get(str(selected_layer["material"])) or custom_material_notes().get(str(selected_layer["material"]))
     if note:
         st.caption(f"{selected_layer['material']}: {note}")
 
 
-def render_stack_panel(catalog: Sequence[str], notes: Mapping[str, str]) -> None:
+def render_stack_panel(catalog: Sequence[str], notes: Mapping[str, str], show_header: bool = True) -> None:
     """Render the full stack-builder panel, including presets, ordering, and editing."""
     _cleanup_layer_widget_state(str(layer["id"]) for layer in st.session_state.layers)
     _ensure_selected_layer()
 
-    st.subheader(":material/layers: Layer sequence", anchor=False)
+    if show_header:
+        st.subheader(":material/layers: Layer sequence", anchor=False)
     # Keep construction actions close to the sequence so stack edits and layer selection read as one workflow.
     with st.container(border=True):
         try:
             with st.container(horizontal=True, horizontal_alignment="distribute"):
                 if st.button(":material/add: Add layer", width="stretch"):
-                    new_layer = _new_layer(material="vac", thickness_m=0.5e-6)
+                    new_layer = _new_layer(material="vac", thickness_m=0.1e-6)
                     st.session_state.layers.insert(1, new_layer)
                     st.session_state.selected_layer_id = str(new_layer["id"])
                     _preserve_calc_state_before_rerun()
@@ -418,10 +408,10 @@ def render_stack_panel(catalog: Sequence[str], notes: Mapping[str, str]) -> None
                     _preserve_calc_state_before_rerun()
                     st.rerun()
         except TypeError:
-            action_cols = st.columns(3, gap="small")
+            action_cols = st.columns(3, gap=None)
             with action_cols[0]:
                 if st.button(":material/add: Add layer", width="stretch"):
-                    new_layer = _new_layer(material="vac", thickness_m=0.5e-6)
+                    new_layer = _new_layer(material="vac", thickness_m=0.1e-6)
                     st.session_state.layers.insert(1, new_layer)
                     st.session_state.selected_layer_id = str(new_layer["id"])
                     _preserve_calc_state_before_rerun()

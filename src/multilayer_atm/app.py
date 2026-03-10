@@ -33,17 +33,20 @@ def run_app() -> None:
     stack_col, workspace_col = st.columns([0.32, 0.68], gap="small", vertical_alignment="top")
 
     with stack_col:
+        st.subheader(":material/layers: Layer sequence", anchor=False)
         with st.container(gap=None):
-            render_stack_panel(catalog=catalog, notes=notes)
+            render_stack_panel(catalog=catalog, notes=notes, show_header=False)
 
     with workspace_col:
         st.subheader(":material/tune: Run controls", anchor=False)
         with st.container(border=True):
-            top_row_left, top_row_right = st.columns([0.44, 0.56], gap="small", vertical_alignment="top")
+            top_row_left, top_row_right = st.columns([0.44, 0.56], gap=None, vertical_alignment="top")
             with top_row_left:
-                render_run_controls_panel(speed_presets=SPEED_PRESETS)
+                with st.container(height="stretch"):
+                    render_run_controls_panel(speed_presets=SPEED_PRESETS)
             with top_row_right:
-                render_mode_input_strip(speed_presets=SPEED_PRESETS)
+                with st.container(height="stretch"):
+                    render_mode_input_strip(speed_presets=SPEED_PRESETS)
 
         with st.container(gap=None):
             render_results_panel()

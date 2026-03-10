@@ -31,7 +31,7 @@ def _layer_record(layer_id: str, material: str, thickness_m: float) -> dict[str,
         "alpha": 0.0,
         "beta": 0.0,
         "gamma": 0.0,
-        "doping_enabled": False,
+        "doping_enabled": True,
         "wp_cm1": 0.0,
         "gp_cm1": 0.0,
     }

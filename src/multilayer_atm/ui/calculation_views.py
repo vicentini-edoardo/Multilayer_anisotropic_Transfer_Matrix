@@ -194,14 +194,14 @@ def _build_export_txt(
     buffer.write(f"# rows: {data.shape[0]}\n")
     buffer.write(f"# columns: {','.join(columns)}\n")
     buffer.write("# layers:\n")
-    buffer.write("# layer_index,role,material,thickness_m,thickness_um,alpha_deg,beta_deg,gamma_deg\n")
+    buffer.write("# layer_index,role,material,thickness_m,thickness_nm,alpha_deg,beta_deg,gamma_deg\n")
     total_layers = len(stack.layers)
     for idx, layer in enumerate(stack.layers):
         alpha, beta, gamma = layer.euler_deg
         role = _stack_role(idx, total_layers)
-        thickness_um = float(layer.thickness_m) * 1e6
+        thickness_nm = float(layer.thickness_m) * 1e9
         buffer.write(
-            f"# {idx},{role},{layer.material},{layer.thickness_m:.12g},{thickness_um:.12g},"
+            f"# {idx},{role},{layer.material},{layer.thickness_m:.12g},{thickness_nm:.12g},"
             f"{alpha:.12g},{beta:.12g},{gamma:.12g}\n"
         )
     buffer.write(",".join(columns) + "\n")
@@ -518,8 +518,10 @@ def _run_with_progress(
     complete_message: str,
     compute_fn: Callable[[Callable[[float, str], None]], ComputeResultT],
 ) -> ComputeResultT:
-    status = st.empty()
-    progress = st.progress(0.0)
+    progress_col, _ = st.columns([0.72, 0.28], gap=None)
+    with progress_col:
+        progress = st.progress(0.0)
+        status = st.empty()
 
     def _update(fraction: float, message: str) -> None:
         progress.progress(float(np.clip(fraction, 0.0, 1.0)))
@@ -594,13 +596,13 @@ def _render_map_input_strip(speed_presets: Mapping[str, Mapping[str, Mapping[str
     map_state = _mode_state("map")
     map_custom = str(st.session_state.get("map_resolution_choice", "Normal")) == "Custom"
 
-    top_cols = st.columns(3, gap="small")
+    top_cols = st.columns(3, gap=None)
     with top_cols[0]:
         _mode_number_input("map", "phi0", "phi0 (deg)", step=1.0, format="%.1f")
     with top_cols[2]:
         st.selectbox("Resolution", _resolution_choices(speed_presets), key="map_resolution_choice")
 
-    freq_cols = st.columns(3, gap="small")
+    freq_cols = st.columns(3, gap=None)
     with freq_cols[0]:
         _mode_number_input("map", "w_min", "w min (cm⁻¹)", step=10.0)
     with freq_cols[1]:
@@ -608,7 +610,7 @@ def _render_map_input_strip(speed_presets: Mapping[str, Mapping[str, Mapping[str
     with freq_cols[2]:
         _mode_number_input("map", "nw", "Nw", min_value=8, step=8, disabled=not map_custom)
 
-    mom_cols = st.columns(3, gap="small")
+    mom_cols = st.columns(3, gap=None)
     with mom_cols[0]:
         _mode_number_input("map", "kx_min", "kx min (10^3 cm⁻¹)", step=0.05, format="%.3f")
     with mom_cols[1]:
@@ -621,13 +623,13 @@ def _render_iso_input_strip(speed_presets: Mapping[str, Mapping[str, Mapping[str
     iso_state = _mode_state("iso")
     iso_custom = str(st.session_state.get("iso_resolution_choice", "Normal")) == "Custom"
 
-    top_cols = st.columns([1.0, 1.0, 1.0], gap="small")
+    top_cols = st.columns([1.0, 1.0, 1.0], gap=None)
     with top_cols[0]:
         _mode_number_input("iso", "w0", "w0 (cm⁻¹)", step=5.0)
     with top_cols[2]:
         st.selectbox("Resolution", _resolution_choices(speed_presets), key="iso_resolution_choice")
 
-    phi_cols = st.columns(3, gap="small")
+    phi_cols = st.columns(3, gap=None)
     with phi_cols[0]:
         _mode_number_input("iso", "phi_min_deg", "phi0 min (deg)", step=1.0, format="%.1f")
     with phi_cols[1]:
@@ -635,7 +637,7 @@ def _render_iso_input_strip(speed_presets: Mapping[str, Mapping[str, Mapping[str
     with phi_cols[2]:
         _mode_number_input("iso", "nphi", "Nphi0", min_value=8, step=8, disabled=not iso_custom)
 
-    mom_cols = st.columns(3, gap="small")
+    mom_cols = st.columns(3, gap=None)
     with mom_cols[0]:
         _mode_number_input("iso", "kx_min", "kx min (10^3 cm⁻¹)", step=0.05, format="%.3f")
     with mom_cols[1]:
@@ -756,7 +758,7 @@ def render_run_controls_panel(speed_presets: Mapping[str, Mapping[str, Mapping[s
         st.warning(warning, icon=":material/warning:")
     _render_validation_errors(errors)
     with st.form("run_controls_form", border=False):
-        button_col, _ = st.columns([0.72, 0.28], gap="small")
+        button_col, _ = st.columns([0.72, 0.28], gap=None)
         with button_col:
             run_now = st.form_submit_button(button_label, width="stretch", type="primary", disabled=bool(errors))
     if run_now:
@@ -780,13 +782,19 @@ def _render_plot_toolbar(
     image_file_name: str | None,
 ) -> None:
     with st.container():
-        st.caption("Plot controls")
-        top_row = st.columns([0.24, 0.15, 0.14, 0.18, 0.14], gap="small", vertical_alignment="center")
-        with top_row[0]:
+        st.caption(":material/tune: Plot controls")
+        settings_row = st.columns([0.30, 0.18, 0.18, 0.16, 0.18], gap=None, vertical_alignment="bottom")
+        with settings_row[0]:
             st.selectbox("Colormap", list(PLOT_COLORMAPS.keys()), key="plot_colormap")
-        with top_row[1]:
+        with settings_row[1]:
+            st.toggle(
+                "Preview plots",
+                key="fast_preview_plots",
+                help="Downsamples only the displayed plot. Computation stays full resolution.",
+            )
+        with settings_row[2]:
             st.toggle("Peak dots", key="show_peak_dots", disabled=not has_result)
-        with top_row[2]:
+        with settings_row[3]:
             st.number_input(
                 "Threshold %",
                 min_value=0.0,
@@ -795,18 +803,13 @@ def _render_plot_toolbar(
                 key="peak_dot_threshold_percent",
                 disabled=not has_result or not bool(st.session_state.get("show_peak_dots", True)),
             )
-        with top_row[3]:
-            st.toggle(
-                "Preview plots",
-                key="fast_preview_plots",
-                help="Downsamples only the displayed plot. Computation stays full resolution.",
-            )
-        with top_row[4]:
+        with settings_row[4]:
             freshness = "Current" if _results_are_current() else "Stale"
-            st.caption(f"State: {freshness}")
-        action_row = st.columns([0.28, 0.18, 0.18, 0.18], gap="small", vertical_alignment="center")
+            st.caption(f":material/monitoring: State: {freshness}")
+
+        action_row = st.columns([0.22, 0.26, 0.26, 0.26], gap=None, vertical_alignment="center")
         with action_row[0]:
-            st.caption("Exports and reset")
+            st.caption(":material/settings: Actions")
         with action_row[1]:
             if st.button(":material/refresh: Reset view", width="stretch", disabled=not has_result):
                 st.session_state.plot_refresh_nonce = int(st.session_state.get("plot_refresh_nonce", 0)) + 1

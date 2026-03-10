@@ -60,14 +60,14 @@ def apply_theme() -> None:
 def render_top_bar(status: dict[str, str] | None = None) -> None:
     """Render the compact top bar with run context and freshness information."""
     st.markdown('<div class="topbar">', unsafe_allow_html=True)
-    with st.container(gap=None):
-        title_col, worker_col = st.columns([0.82, 0.18], gap="small", vertical_alignment="top")
+    with st.container(gap=None, horizontal_alignment="distribute"):
+        title_col, worker_col = st.columns([0.82, 0.18], gap=None, vertical_alignment="bottom")
         with title_col:
             st.title("Multilayer anisotropic transfer matrix", anchor=False)
             st.caption("Developed by Edoardo Vicentini")
         with worker_col:
             with st.container():
-                label_col, slider_col = st.columns([0.36, 0.64], gap="small", vertical_alignment="center")
+                label_col, slider_col = st.columns([0.36, 0.64], gap=None, vertical_alignment="center")
                 with label_col:
                     st.caption("CPU workers")
                 with slider_col:
