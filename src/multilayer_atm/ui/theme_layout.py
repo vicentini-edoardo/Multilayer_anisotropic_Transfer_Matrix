@@ -51,6 +51,56 @@ def apply_theme() -> None:
         padding-right: 0.5rem;
     }
 }
+
+/* ── Phone layout (≤ 640 px) ───────────────────────────────────────────── */
+@media (max-width: 640px) {
+
+    /* Compact outer padding */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-left: 0.35rem !important;
+        padding-right: 0.35rem !important;
+    }
+
+    /* Stack ALL horizontal column blocks vertically by default */
+    section.main [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+    }
+    section.main [data-testid="column"] {
+        width: 100% !important;
+        flex: 0 0 100% !important;
+        min-width: 0 !important;
+    }
+
+    /* Exception: keep per-layer action buttons (select / up / down / delete)
+       in a single horizontal row inside .stack-sequence */
+    .stack-sequence [data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
+    }
+    .stack-sequence [data-testid="column"] {
+        width: auto !important;
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+    }
+
+    /* Shrink title so it fits on one line */
+    .topbar h1 {
+        font-size: 1.35rem !important;
+        line-height: 1.3 !important;
+    }
+
+    /* Larger touch targets for buttons and select / number inputs */
+    button[kind="primary"],
+    button[kind="secondary"],
+    button[kind="tertiary"] {
+        min-height: 2.6rem !important;
+    }
+    input[type="number"],
+    input[type="text"],
+    div[data-baseweb="select"] > div:first-child {
+        min-height: 2.4rem !important;
+    }
+}
 </style>
 """,
         unsafe_allow_html=True,
