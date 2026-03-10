@@ -80,6 +80,11 @@ def _initial_calc_defaults(speed_presets: Mapping[str, Mapping[str, Mapping[str,
         "last_compute_timestamp": None,
         "map_result": None,
         "iso_result": None,
+        "map_history": [],
+        "iso_history": [],
+        "selected_map_history_id": None,
+        "selected_iso_history_id": None,
+        "history_seq": 0,
         "calc_settings": {},
         "map_state": {
             "phi0": 0.0,
@@ -504,6 +509,130 @@ def _store_compute_snapshot(mode: str) -> None:
     }
 
 
+def _stack_history_summary(mode: str) -> str:
+    stack = build_stack_from_session()
+    materials = [str(layer.material) for layer in stack.layers]
+    if not materials:
+        stack_summary = "empty stack"
+    elif len(materials) <= 4:
+        stack_summary = " > ".join(materials)
+    else:
+        stack_summary = " > ".join(materials[:3]) + f" > ... (+{len(materials) - 3})"
+
+    if mode == "map":
+        state = _mode_state("map")
+        return (
+            f"{stack_summary} | "
+            f"phi0 {float(state['phi0']):.1f} deg | "
+            f"w {float(state['w_min']):.1f}-{float(state['w_max']):.1f} cm^-1 | "
+            f"k {float(state['kx_min']):.3f}-{float(state['kx_max']):.3f} x10^3 cm^-1"
+        )
+
+    state = _mode_state("iso")
+    return (
+        f"{stack_summary} | "
+        f"w0 {float(state['w0']):.1f} cm^-1 | "
+        f"phi {float(state['phi_min_deg']):.1f}-{float(state['phi_max_deg']):.1f} deg | "
+        f"k {float(state['kx_min']):.3f}-{float(state['kx_max']):.3f} x10^3 cm^-1"
+    )
+
+
+def _next_history_id(prefix: str) -> str:
+    seq = int(st.session_state.get("history_seq", 0)) + 1
+    st.session_state.history_seq = seq
+    return f"{prefix}_{seq}"
+
+
+def _append_map_history(wv: np.ndarray, kxv: np.ndarray, im_rpp: np.ndarray) -> None:
+    entry = {
+        "id": _next_history_id("map"),
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "resolution": str(st.session_state.get("map_resolution_choice", "Normal")),
+        "stack_summary": _stack_history_summary("map"),
+        "payload": (np.asarray(wv, dtype=float), np.asarray(kxv, dtype=float), np.asarray(im_rpp, dtype=float)),
+    }
+    st.session_state.map_history.append(entry)
+    st.session_state.selected_map_history_id = str(entry["id"])
+
+
+def _append_iso_history(phiv: np.ndarray, kxv: np.ndarray, im_rpp: np.ndarray) -> None:
+    entry = {
+        "id": _next_history_id("iso"),
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "resolution": str(st.session_state.get("iso_resolution_choice", "Normal")),
+        "stack_summary": _stack_history_summary("iso"),
+        "payload": (np.asarray(phiv, dtype=float), np.asarray(kxv, dtype=float), np.asarray(im_rpp, dtype=float)),
+    }
+    st.session_state.iso_history.append(entry)
+    st.session_state.selected_iso_history_id = str(entry["id"])
+
+
+def _history_label(entry: Mapping[str, Any]) -> str:
+    timestamp = str(entry.get("timestamp_utc", ""))
+    ts_short = timestamp.replace("T", " ").replace("+00:00", "Z")[:19]
+    resolution = str(entry.get("resolution", ""))
+    stack_summary = str(entry.get("stack_summary", ""))
+    return f"{ts_short} | {resolution} | {stack_summary}"
+
+
+def _sync_selected_history_result(mode: str) -> None:
+    if mode == "map":
+        history = list(st.session_state.get("map_history", []))
+        if not history:
+            return
+        selected_id = st.session_state.get("selected_map_history_id")
+        if selected_id is None or not any(str(item.get("id")) == str(selected_id) for item in history):
+            selected_id = str(history[-1]["id"])
+            st.session_state.selected_map_history_id = selected_id
+        selected_entry = next((item for item in history if str(item.get("id")) == str(selected_id)), history[-1])
+        st.session_state.map_result = tuple(selected_entry["payload"])  # type: ignore[assignment]
+        return
+
+    history = list(st.session_state.get("iso_history", []))
+    if not history:
+        return
+    selected_id = st.session_state.get("selected_iso_history_id")
+    if selected_id is None or not any(str(item.get("id")) == str(selected_id) for item in history):
+        selected_id = str(history[-1]["id"])
+        st.session_state.selected_iso_history_id = selected_id
+    selected_entry = next((item for item in history if str(item.get("id")) == str(selected_id)), history[-1])
+    st.session_state.iso_result = tuple(selected_entry["payload"])  # type: ignore[assignment]
+
+
+def _render_history_selector(mode: str) -> None:
+    if mode == "map":
+        history = list(st.session_state.get("map_history", []))
+        if not history:
+            return
+        options = [str(item["id"]) for item in history]
+        selected = st.session_state.get("selected_map_history_id")
+        if selected not in options:
+            selected = options[-1]
+        st.session_state.selected_map_history_id = st.selectbox(
+            "Saved map",
+            options,
+            index=options.index(str(selected)),
+            format_func=lambda opt: _history_label(next(item for item in history if str(item["id"]) == str(opt))),
+        )
+        _sync_selected_history_result("map")
+        return
+
+    history = list(st.session_state.get("iso_history", []))
+    if not history:
+        return
+    options = [str(item["id"]) for item in history]
+    selected = st.session_state.get("selected_iso_history_id")
+    if selected not in options:
+        selected = options[-1]
+    st.session_state.selected_iso_history_id = st.selectbox(
+        "Saved map",
+        options,
+        index=options.index(str(selected)),
+        format_func=lambda opt: _history_label(next(item for item in history if str(item["id"]) == str(opt))),
+    )
+    _sync_selected_history_result("iso")
+
+
 def _estimated_cost_label(grid_points: int, workers: int) -> str:
     points_per_worker = max(grid_points / max(workers, 1), 1.0)
     if points_per_worker < 12_000:
@@ -709,7 +838,8 @@ def _execute_active_compute(workers: int) -> None:
                 custom_materials=custom_material_registry(),
             ),
         )
-        st.session_state.map_result = (wv, kxv, im_rpp)
+        _append_map_history(wv, kxv, im_rpp)
+        _sync_selected_history_result("map")
         _store_compute_snapshot("Im(rpp) as f(w, kx)")
         return
 
@@ -732,7 +862,8 @@ def _execute_active_compute(workers: int) -> None:
             custom_materials=custom_material_registry(),
         ),
     )
-    st.session_state.iso_result = (phiv, kxv, im_rpp)
+    _append_iso_history(phiv, kxv, im_rpp)
+    _sync_selected_history_result("iso")
     _store_compute_snapshot("Isofrequency surface")
 
 
@@ -880,6 +1011,7 @@ def _current_plot_image_payload() -> tuple[bytes | None, str | None]:
 
 
 def _render_map_plot(resolution_name: str, workers: int) -> bytes | None:
+    _render_history_selector("map")
     if st.session_state.map_result is None:
         st.caption(":material/analytics: Run the computation to show the map.")
         return None
@@ -926,6 +1058,7 @@ def _render_map_plot(resolution_name: str, workers: int) -> bytes | None:
 
 
 def _render_iso_plot(resolution_name: str, workers: int) -> bytes | None:
+    _render_history_selector("iso")
     if st.session_state.iso_result is None:
         st.caption(":material/radar: Run the computation to show the surface.")
         return None
@@ -1047,6 +1180,7 @@ def render_results_panel() -> None:
     resolution_name = _active_resolution_choice()
     workers = int(st.session_state.get("worker_count", 4))
     mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
+    _sync_selected_history_result("map" if mode == "Im(rpp) as f(w, kx)" else "iso")
 
     with st.container(gap=None):
         with st.container(border=True):
