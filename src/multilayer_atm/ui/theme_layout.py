@@ -8,7 +8,7 @@ import streamlit as st
 def configure_page() -> None:
     """Set the Streamlit page metadata and use the wide scientific workspace layout."""
     st.set_page_config(
-        page_title="Passler rpp Explorer",
+        page_title="anisotropic dispersion",
         page_icon=":material/waves:",
         layout="wide",
     )
