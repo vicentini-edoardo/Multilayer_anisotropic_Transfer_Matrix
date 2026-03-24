@@ -64,7 +64,7 @@ def render_top_bar(status: dict[str, str] | None = None) -> None:
         title_col, worker_col = st.columns([0.82, 0.18], gap=None, vertical_alignment="bottom")
         with title_col:
             st.title("Multilayer anisotropic transfer matrix", anchor=False)
-            st.caption("Developed by Edoardo Vicentini")
+            st.caption("Developed by [Edoardo Vicentini](https://github.com/vicentini-edoardo)")
         with worker_col:
             with st.container():
                 label_col, slider_col = st.columns([0.36, 0.64], gap=None, vertical_alignment="center")
