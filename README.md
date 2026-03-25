@@ -24,18 +24,16 @@ The implementation is based on the generalized 4×4 formalism described by Passl
 
 ## Installation
 
-Create a Python environment and install the dependencies:
+Install the project into the system `python3` environment:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 ```
 
 The repository also supports editable installation:
 
 ```bash
-pip install -e .
+python3 -m pip install -e .
 ```
 
 ## Quick start
@@ -43,7 +41,7 @@ pip install -e .
 Run the application with Streamlit:
 
 ```bash
-streamlit run app.py
+python3 -m streamlit run app.py
 ```
 
 The app is designed to work directly from a fresh clone. The root `app.py` adds the local `src/` directory to `sys.path`, so installation is not required to launch the Streamlit interface after dependencies are installed.
@@ -54,7 +52,7 @@ If you only want to use the public deployment, open:
 
 ## Example usage
 
-1. Start the app with `streamlit run app.py`
+1. Start the app with `python3 -m streamlit run app.py`
 2. Load the built-in example stack from the stack builder panel
 3. Adjust layer material, thickness, orientation, or Drude term
 4. Choose either dispersion or isofrequency mode
