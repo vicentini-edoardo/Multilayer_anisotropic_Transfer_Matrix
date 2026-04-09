@@ -59,20 +59,15 @@ class StackSpec:
         return StackSpec.from_layers(updated)
 
     def with_interior_alpha_offset(self, phi_deg: float) -> "StackSpec":
-        """Apply a common in-plane alpha offset to all interior layers."""
+        """Apply a common in-plane alpha offset to all layers."""
         shifted: List[LayerSpec] = []
-        last = len(self.layers) - 1
-        for idx, layer in enumerate(self.layers):
+        for layer in self.layers:
             alpha, beta, gamma = layer.euler_deg
-            if idx in (0, last):
-                shifted_alpha = alpha
-            else:
-                shifted_alpha = alpha + phi_deg
             shifted.append(
                 LayerSpec(
                     material=layer.material,
                     thickness_m=layer.thickness_m,
-                    euler_deg=(shifted_alpha, beta, gamma),
+                    euler_deg=(alpha + phi_deg, beta, gamma),
                     doping=layer.doping,
                 )
             )

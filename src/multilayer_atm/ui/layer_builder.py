@@ -17,6 +17,7 @@ from .material_builder import (
     material_selector_options,
     material_selection_callback_args,
     maybe_open_custom_material_dialog,
+    render_edit_custom_material_button,
 )
 
 
@@ -164,10 +165,7 @@ def build_stack_from_session() -> StackSpec:
     for index, layer in enumerate(st.session_state.layers):
         boundary = index in (0, total - 1)
         thickness = 0.0 if boundary else float(layer["thickness_m"])
-        if boundary:
-            euler = (0.0, 0.0, 0.0)
-        else:
-            euler = (float(layer["alpha"]), float(layer["beta"]), float(layer["gamma"]))
+        euler = (float(layer["alpha"]), float(layer["beta"]), float(layer["gamma"]))
         layers.append(
             LayerSpec(
                 material=str(layer["material"]),
@@ -284,15 +282,13 @@ def _sync_layer_from_widgets(layer: Dict[str, object], layer_id: str, boundary: 
         args=material_selection_callback_args(material_key, current_material),
     )
     maybe_open_custom_material_dialog(material_key, catalog)
-    layer["material"] = str(st.session_state.get(material_key, current_material))
+    selected_material = str(st.session_state.get(material_key, current_material))
+    render_edit_custom_material_button(material_key, selected_material)
+    layer["material"] = selected_material
 
     if boundary:
-        st.caption("Semi-inf. Thickness and rotation remain fixed.")
+        st.caption("Semi-inf. Thickness remains fixed.")
         layer["thickness_m"] = 0.0
-        layer["alpha_rel_substrate_deg"] = 0.0
-        layer["alpha"] = 0.0
-        layer["beta"] = 0.0
-        layer["gamma"] = 0.0
     else:
         thickness_key = _init_layer_widget_state(layer_id, "thk_", current_thickness_nm)
         thickness_nm = st.number_input(
@@ -303,30 +299,30 @@ def _sync_layer_from_widgets(layer: Dict[str, object], layer_id: str, boundary: 
         )
         layer["thickness_m"] = float(thickness_nm) * 1e-9
 
-        st.caption("Euler angles (deg)")
-        col_a, col_b, col_g = st.columns(3, gap=None)
-        alpha_key = _init_layer_widget_state(layer_id, "a_", float(layer["alpha"]))
-        beta_key = _init_layer_widget_state(layer_id, "b_", float(layer["beta"]))
-        gamma_key = _init_layer_widget_state(layer_id, "g_", float(layer["gamma"]))
-        alpha = col_a.number_input(
-            "α",
-            step=1.0,
-            key=alpha_key,
-        )
-        beta = col_b.number_input(
-            "β",
-            step=1.0,
-            key=beta_key,
-        )
-        gamma = col_g.number_input(
-            "γ",
-            step=1.0,
-            key=gamma_key,
-        )
-        layer["alpha"] = alpha
-        layer["alpha_rel_substrate_deg"] = alpha
-        layer["beta"] = beta
-        layer["gamma"] = gamma
+    st.caption("Euler angles (deg)")
+    col_a, col_b, col_g = st.columns(3, gap=None)
+    alpha_key = _init_layer_widget_state(layer_id, "a_", float(layer["alpha"]))
+    beta_key = _init_layer_widget_state(layer_id, "b_", float(layer["beta"]))
+    gamma_key = _init_layer_widget_state(layer_id, "g_", float(layer["gamma"]))
+    alpha = col_a.number_input(
+        "α",
+        step=1.0,
+        key=alpha_key,
+    )
+    beta = col_b.number_input(
+        "β",
+        step=1.0,
+        key=beta_key,
+    )
+    gamma = col_g.number_input(
+        "γ",
+        step=1.0,
+        key=gamma_key,
+    )
+    layer["alpha"] = alpha
+    layer["alpha_rel_substrate_deg"] = alpha
+    layer["beta"] = beta
+    layer["gamma"] = gamma
 
     if boundary:
         st.caption("Drude doping parameters")

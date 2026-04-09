@@ -23,6 +23,8 @@ CUSTOM_MATERIAL_DIALOG_TARGET_KEY = "custom_material_dialog_target"
 CUSTOM_MATERIAL_DIALOG_PREVIOUS_KEY = "custom_material_dialog_previous"
 CUSTOM_MATERIAL_DIALOG_OPEN_KEY = "custom_material_dialog_open"
 CUSTOM_MATERIAL_DIALOG_IMPORT_DIGEST_KEY = "custom_material_dialog_import_digest"
+CUSTOM_MATERIAL_DIALOG_EDIT_MODE_KEY = "custom_material_dialog_edit_mode"
+CUSTOM_MATERIAL_DIALOG_ORIGINAL_NAME_KEY = "custom_material_dialog_original_name"
 
 
 def init_custom_material_state() -> None:
@@ -32,6 +34,8 @@ def init_custom_material_state() -> None:
     st.session_state.setdefault(CUSTOM_MATERIAL_DIALOG_PREVIOUS_KEY, None)
     st.session_state.setdefault(CUSTOM_MATERIAL_DIALOG_OPEN_KEY, False)
     st.session_state.setdefault(CUSTOM_MATERIAL_DIALOG_IMPORT_DIGEST_KEY, None)
+    st.session_state.setdefault(CUSTOM_MATERIAL_DIALOG_EDIT_MODE_KEY, False)
+    st.session_state.setdefault(CUSTOM_MATERIAL_DIALOG_ORIGINAL_NAME_KEY, None)
 
 
 def custom_material_registry() -> dict[str, dict[str, Any]]:
@@ -74,7 +78,10 @@ def _reset_dialog_keys() -> None:
 def _load_definition_into_dialog(definition: Mapping[str, Any]) -> None:
     _reset_dialog_keys()
     st.session_state[_dialog_key("name")] = str(definition["name"])
-    st.session_state[_dialog_key("tensor_mode")] = str(definition["tensor_mode"])
+    st.session_state[_dialog_key("tensor_mode")] = {
+        "isotropic": "Isotropic",
+        "anisotropic_diagonal": "Anisotropic diagonal",
+    }.get(str(definition["tensor_mode"]), "Isotropic")
     for axis_name in AXIS_NAMES:
         axis_definition = definition["axes"][axis_name]
         source_type = str(axis_definition["source_type"])
@@ -273,12 +280,14 @@ def _build_dialog_definition(builtin_catalog: Sequence[str]) -> tuple[dict[str, 
     errors: list[str] = []
     name = str(st.session_state[_dialog_key("name")]).strip()
     tensor_mode = "isotropic" if st.session_state[_dialog_key("tensor_mode")] == "Isotropic" else "anisotropic_diagonal"
+    edit_mode = bool(st.session_state.get(CUSTOM_MATERIAL_DIALOG_EDIT_MODE_KEY, False))
+    original_name = st.session_state.get(CUSTOM_MATERIAL_DIALOG_ORIGINAL_NAME_KEY)
 
     if not name:
         errors.append("Material name cannot be empty.")
     if name in builtin_catalog:
         errors.append("Material name conflicts with a built-in material.")
-    if name in custom_material_registry():
+    if name in custom_material_registry() and not (edit_mode and name == original_name):
         errors.append("Material name already exists in the current session.")
 
     axes_to_build = ("xx",) if tensor_mode == "isotropic" else AXIS_NAMES
@@ -304,18 +313,73 @@ def _build_dialog_definition(builtin_catalog: Sequence[str]) -> tuple[dict[str, 
     }, errors
 
 
-@st.dialog("Add custom material", width="large")
+def _rename_material_in_layers(old_name: str, new_name: str) -> None:
+    """Update all layer records and widget states that reference old_name."""
+    for layer in st.session_state.get("layers", []):
+        if str(layer.get("material")) == old_name:
+            layer["material"] = new_name
+    for key in list(st.session_state.keys()):
+        if key.startswith("mat_") and st.session_state[key] == old_name:
+            st.session_state[key] = new_name
+
+
+def open_edit_custom_material_dialog(
+    material_name: str, material_key: str
+) -> None:
+    """Open the dialog pre-populated for editing an existing custom material."""
+    registry = custom_material_registry()
+    definition = registry.get(material_name)
+    if definition is None:
+        return
+    _reset_dialog_keys()
+    _load_definition_into_dialog(definition)
+    st.session_state[CUSTOM_MATERIAL_DIALOG_TARGET_KEY] = material_key
+    st.session_state[CUSTOM_MATERIAL_DIALOG_PREVIOUS_KEY] = material_name
+    st.session_state[CUSTOM_MATERIAL_DIALOG_EDIT_MODE_KEY] = True
+    st.session_state[CUSTOM_MATERIAL_DIALOG_ORIGINAL_NAME_KEY] = material_name
+    st.session_state[CUSTOM_MATERIAL_DIALOG_OPEN_KEY] = True
+    st.rerun()
+
+
+def render_edit_custom_material_button(
+    material_key: str, material_name: str
+) -> None:
+    """Render an edit button when material_name is a custom material."""
+    if material_name not in custom_material_registry():
+        return
+    if st.button(
+        "Edit material",
+        key=f"edit_custom_{material_key}",
+        icon=":material/edit:",
+        help=f"Modify the definition of '{material_name}'",
+    ):
+        open_edit_custom_material_dialog(material_name, material_key)
+
+
+@st.dialog("Custom material", width="large")
 def _render_custom_material_dialog(builtin_catalog: Sequence[str]) -> None:
+    edit_mode = bool(st.session_state.get(CUSTOM_MATERIAL_DIALOG_EDIT_MODE_KEY, False))
+    original_name = st.session_state.get(CUSTOM_MATERIAL_DIALOG_ORIGINAL_NAME_KEY)
+
     _ensure_dialog_defaults()
     _capture_imported_definition()
 
+    if edit_mode and original_name:
+        st.caption(f":material/edit: Editing **{original_name}**")
+
     st.text_input("Material name", key=_dialog_key("name"))
-    st.selectbox("Tensor type", ["Isotropic", "Anisotropic diagonal"], key=_dialog_key("tensor_mode"))
+    st.selectbox(
+        "Tensor type",
+        ["Isotropic", "Anisotropic diagonal"],
+        key=_dialog_key("tensor_mode"),
+    )
 
     if st.session_state[_dialog_key("tensor_mode")] == "Isotropic":
         with st.container(border=True):
             st.markdown("**Diagonal tensor**")
-            st.caption("Isotropic mode reuses the same axis definition for εxx, εyy, and εzz.")
+            st.caption(
+                "Isotropic mode reuses the same axis definition for εxx, εyy, and εzz."
+            )
             _render_axis_definition_editor("xx")
     else:
         for axis_name in AXIS_NAMES:
@@ -343,15 +407,26 @@ def _render_custom_material_dialog(builtin_catalog: Sequence[str]) -> None:
         if target_key and previous_material is not None:
             st.session_state[target_key] = previous_material
         st.session_state[CUSTOM_MATERIAL_DIALOG_OPEN_KEY] = False
+        st.session_state[CUSTOM_MATERIAL_DIALOG_EDIT_MODE_KEY] = False
+        st.session_state[CUSTOM_MATERIAL_DIALOG_ORIGINAL_NAME_KEY] = None
         st.rerun()
 
-    if action_cols[1].button("Add material", width="stretch", type="primary", disabled=definition is None):
+    save_label = "Save changes" if edit_mode else "Add material"
+    if action_cols[1].button(
+        save_label, width="stretch", type="primary", disabled=definition is None
+    ):
         registry = custom_material_registry()
-        registry[str(definition["name"])] = definition
+        new_name = str(definition["name"])
+        if edit_mode and original_name and original_name != new_name:
+            registry.pop(original_name, None)
+            _rename_material_in_layers(original_name, new_name)
+        registry[new_name] = definition
         target_key = st.session_state.get(CUSTOM_MATERIAL_DIALOG_TARGET_KEY)
         if target_key:
-            st.session_state[target_key] = str(definition["name"])
+            st.session_state[target_key] = new_name
         st.session_state[CUSTOM_MATERIAL_DIALOG_OPEN_KEY] = False
+        st.session_state[CUSTOM_MATERIAL_DIALOG_EDIT_MODE_KEY] = False
+        st.session_state[CUSTOM_MATERIAL_DIALOG_ORIGINAL_NAME_KEY] = None
         st.rerun()
 
 
