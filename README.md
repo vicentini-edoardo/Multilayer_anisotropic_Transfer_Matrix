@@ -3,6 +3,7 @@
 A scientific Streamlit application for building multilayer optical stacks, assigning anisotropic material models, and exploring `Im(rpp)` dispersion and isofrequency maps with a pyGTM-based transfer-matrix solver.
 
 Live app: <https://multilayeranisotropictransfermatrix-ev.streamlit.app>
+Repository: <https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix>
 
 ![Representative application overview](assets/figures/streamlit-workspace.png)
 
@@ -109,8 +110,9 @@ Runtime dependencies are declared in both `requirements.txt` and `pyproject.toml
 
 This public repository packages and cleans up a scientific codebase built around the original anisotropic transfer-matrix workflow and `pyGTM`-based material/system handling. Please also credit the upstream scientific and software work when using this project:
 
-- N. C. Passler and A. Paarmann, *Journal of the Optical Society of America B* **34**, 2128 (2017), DOI: [10.1364/JOSAB.34.002128](https://doi.org/10.1364/JOSAB.34.002128)
-- `pyGTM` repository: <https://github.com/pyMatJ/pyGTM>
+- N. C. Passler and A. Paarmann, "Generalized 4 x 4 matrix formalism for light propagation in anisotropic stratified media: study of surface phonon polaritons in polar dielectric heterostructures," *Journal of the Optical Society of America B* **34**(10), 2128 (2017). DOI: [10.1364/JOSAB.34.002128](https://doi.org/10.1364/JOSAB.34.002128)
+- M. Jeannin, *pyGTM* [software], GitHub repository, <https://github.com/pyMatJ/pyGTM> (accessed 2026-04-09)
+- E. Vicentini, *Multilayer anisotropic transfer matrix* [software], GitHub repository, <https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix> (accessed 2026-04-09)
 
 ## Citation
 

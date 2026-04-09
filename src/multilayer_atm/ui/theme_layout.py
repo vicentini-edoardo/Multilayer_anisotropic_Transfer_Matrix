@@ -138,9 +138,16 @@ def render_footer() -> None:
         "Units: w in cm⁻¹, kx UI in 10^3 cm⁻¹, boundary layers semi-infinite, Euler angles per layer."
     )
     st.caption(
-        "Reference: N. C. Passler and A. Paarmann, Journal of the Optical Society of America B 34, 2128 (2017), "
-        "DOI: https://doi.org/10.1364/JOSAB.34.002128"
+        'Reference: N. C. Passler and A. Paarmann, "Generalized 4 x 4 matrix formalism for light '
+        'propagation in anisotropic stratified media: study of surface phonon polaritons in polar dielectric '
+        'heterostructures," Journal of the Optical Society of America B 34(10), 2128 (2017). '
+        'DOI: https://doi.org/10.1364/JOSAB.34.002128'
     )
     st.caption(
-        "pyGTM repository: https://github.com/pyMatJ/pyGTM"
+        "Software: M. Jeannin, pyGTM [software], GitHub repository, "
+        "https://github.com/pyMatJ/pyGTM (accessed 2026-04-09)"
+    )
+    st.caption(
+        "Software: E. Vicentini, Multilayer anisotropic transfer matrix [software], GitHub repository, "
+        "https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix (accessed 2026-04-09)"
     )
