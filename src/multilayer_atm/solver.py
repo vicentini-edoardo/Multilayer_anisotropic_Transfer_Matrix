@@ -23,6 +23,17 @@ except Exception as exc:  # pragma: no cover - exercised by runtime environment 
 
 ProgressCallback = Optional[Callable[[float, str], None]]
 
+# Exceptions that legitimately signal a singular/ill-conditioned point in the
+# transfer-matrix evaluation. These are mapped to a zero reflectivity sample.
+# Anything outside this set (KeyError for an unknown material, AttributeError,
+# TypeError, ...) is a genuine bug and is allowed to propagate so it surfaces to
+# the user instead of producing a misleading all-zero map.
+_NUMERICAL_ERRORS = (np.linalg.LinAlgError, FloatingPointError, ZeroDivisionError, ValueError)
+
+# Small imaginary part used to lift zeta off the real axis when the in-plane
+# momentum is purely real, which avoids pyGTM mode-sorting singular branches.
+_ZETA_IMAG_REG = 1e-14
+
 DELTA1234 = np.array(
     [[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]],
     dtype=np.complex128,
@@ -52,6 +63,13 @@ def passler_to_pygtm_euler(euler_deg: Sequence[float]) -> Tuple[float, float, fl
     Passler angles are (alpha, beta, gamma) in degrees.
     pyGTM expects arguments (theta, phi, psi) where:
     theta = beta, phi = alpha, psi = gamma.
+
+    NOTE: this is an angle re-labelling only. It is exact when both libraries
+    share the same intrinsic z-x-z axis sequence. If pyGTM is ever found to use
+    a different sequence (e.g. z-y-z), this mapping must be corrected and
+    validated against a known reference (e.g. a uniaxial crystal at a fixed
+    orientation) — relabelling alone would otherwise introduce a silent
+    physics error.
     """
     alpha, beta, gamma = euler_deg
     theta = np.deg2rad(beta)
@@ -136,14 +154,16 @@ def _compute_row_with_system(system: GTM.System, w_cm1: float, kx_cm1: np.ndarra
     row = np.empty(kx_cm1.shape[0], dtype=np.complex128)
     zeta = np.asarray(kx_cm1, dtype=float) * (1.0 / float(w_cm1))
     for j, z in enumerate(zeta):
-        # Small imaginary regularization avoids pyGTM mode-sorting singular branches.
-        z_reg = complex(float(np.real(z)), 1e-14)
+        # Preserve a genuine imaginary momentum (evanescent input) when present;
+        # otherwise lift the purely real value off the singular branch.
+        z_imag = float(np.imag(z))
+        z_reg = complex(float(np.real(z)), z_imag if z_imag != 0.0 else _ZETA_IMAG_REG)
         try:
             gamma_star = _calculate_gamma_star_no_eps(system, f_hz, z_reg)
-        except Exception:
+        except _NUMERICAL_ERRORS:
             try:
                 gamma_star = system.calculate_GammaStar(f_hz, z_reg)
-            except Exception:
+            except _NUMERICAL_ERRORS:
                 row[j] = 0.0 + 0.0j
                 continue
         row[j] = _rpp_from_gamma_star(gamma_star)
@@ -352,7 +372,7 @@ def compute_isofreq_map(
         workers = _default_workers()
 
     w_rows = np.full(phi_values.shape[0], float(w0), dtype=float)
-    phi_offsets_deg = np.rad2deg(phi_values) if global_phi_sweep else np.zeros_like(phi_values)
+    phi_offsets_deg = phi_values_deg if global_phi_sweep else np.zeros_like(phi_values_deg)
 
     if workers > 1:
         rpp = _run_parallel_rows(

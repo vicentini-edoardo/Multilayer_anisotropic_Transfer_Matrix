@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from io import BytesIO
-from io import StringIO
+from io import BytesIO, StringIO
 import re
 from typing import Any, Callable, Dict, List, Mapping, TypeVar
 
@@ -220,8 +219,8 @@ def _slug_token(value: str) -> str:
     return cleaned.lower() or "layer"
 
 
-def _stack_plot_filename_stem(mode: str) -> str:
-    stack = build_stack_from_session()
+def _stack_plot_filename_stem(mode: str, stack: StackSpec | None = None) -> str:
+    stack = stack if stack is not None else build_stack_from_session()
     layer_tokens: List[str] = []
     for idx, layer in enumerate(stack.layers):
         alpha, _, _ = layer.euler_deg
@@ -241,7 +240,40 @@ def _figure_png_bytes(fig: Any) -> bytes:
     return png_bytes
 
 
-def _dispersion_export_bytes(im_rpp: np.ndarray, kxv_cm1: np.ndarray, wv_cm1: np.ndarray, workers: int, resolution_name: str) -> bytes:
+def _cached_bytes(cache_key: tuple, builder: Callable[[], bytes]) -> bytes:
+    """Memoize expensive export/image byte payloads across reruns.
+
+    The displayed result is immutable once computed, so the same (result,
+    settings) key always yields identical bytes. This avoids re-running
+    np.savetxt over the full grid and re-rendering the Matplotlib figure on
+    every Streamlit rerun (slider drags, widget edits, etc.). The cache is
+    bounded so it cannot grow without limit as new results accumulate.
+    """
+    cache: Dict[tuple, bytes] = st.session_state.setdefault("_export_byte_cache", {})
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    value = builder()
+    cache[cache_key] = value
+    max_entries = 8
+    if len(cache) > max_entries:
+        for stale_key in list(cache.keys())[:-max_entries]:
+            cache.pop(stale_key, None)
+    return value
+
+
+def _displayed_result_id(mode: str) -> str | None:
+    """Stable identifier for the result currently shown, or None if absent."""
+    if mode == "Im(rpp) as f(w, kx)":
+        if st.session_state.get("map_result") is None:
+            return None
+        return str(st.session_state.get("selected_map_history_id"))
+    if st.session_state.get("iso_result") is None:
+        return None
+    return str(st.session_state.get("selected_iso_history_id"))
+
+
+def _dispersion_export_bytes(im_rpp: np.ndarray, kxv_cm1: np.ndarray, wv_cm1: np.ndarray, workers: int, resolution_name: str, stack: StackSpec | None = None) -> bytes:
     kx_grid, w_grid = np.meshgrid(np.asarray(kxv_cm1, dtype=float), np.asarray(wv_cm1, dtype=float), indexing="xy")
     data = np.column_stack(
         [
@@ -250,7 +282,7 @@ def _dispersion_export_bytes(im_rpp: np.ndarray, kxv_cm1: np.ndarray, wv_cm1: np
             w_grid.reshape(-1),
         ]
     )
-    stack = build_stack_from_session()
+    stack = stack if stack is not None else build_stack_from_session()
     return _build_export_txt(
         mode="dispersion",
         stack=stack,
@@ -268,6 +300,7 @@ def _isofrequency_export_bytes(
     w0_cm1: float,
     workers: int,
     resolution_name: str,
+    stack: StackSpec | None = None,
 ) -> bytes:
     kx_grid, phi_grid = np.meshgrid(np.asarray(kxv_cm1, dtype=float), np.asarray(phiv_rad, dtype=float), indexing="xy")
     w_grid = np.full_like(kx_grid, float(w0_cm1), dtype=float)
@@ -279,7 +312,7 @@ def _isofrequency_export_bytes(
             phi_grid.reshape(-1),
         ]
     )
-    stack = build_stack_from_session()
+    stack = stack if stack is not None else build_stack_from_session()
     return _build_export_txt(
         mode="isofrequency",
         stack=stack,
@@ -625,7 +658,7 @@ def _render_history_selector(mode: str) -> None:
     if selected not in options:
         selected = options[-1]
     st.session_state.selected_iso_history_id = st.selectbox(
-        "Saved map",
+        "Saved isofrequency",
         options,
         index=options.index(str(selected)),
         format_func=lambda opt: _history_label(next(item for item in history if str(item["id"]) == str(opt))),
@@ -971,46 +1004,65 @@ def _render_plot_toolbar(
 
 def _current_export_payload(resolution_name: str, workers: int) -> tuple[bytes | None, str | None]:
     mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
+    result_id = _displayed_result_id(mode)
     if mode == "Im(rpp) as f(w, kx)" and st.session_state.map_result is not None:
         wv, kxv, im_rpp = st.session_state.map_result
+        stack = build_stack_from_session()
+        key = ("csv-map", result_id, workers, resolution_name, hash(stack))
         return (
-            _dispersion_export_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv, workers=workers, resolution_name=resolution_name),
-            f"{_stack_plot_filename_stem('dispersion-rpp-export')}.txt",
+            _cached_bytes(
+                key,
+                lambda: _dispersion_export_bytes(
+                    im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv, workers=workers, resolution_name=resolution_name, stack=stack
+                ),
+            ),
+            f"{_stack_plot_filename_stem('dispersion-rpp-export', stack)}.txt",
         )
     if mode == "Isofrequency surface" and st.session_state.iso_result is not None:
         phiv, kxv, im_rpp = st.session_state.iso_result
+        stack = build_stack_from_session()
+        w0 = float(_mode_state("iso")["w0"])
+        key = ("csv-iso", result_id, workers, resolution_name, w0, hash(stack))
         return (
-            _isofrequency_export_bytes(
-                im_rpp=im_rpp,
-                kxv_cm1=kxv,
-                phiv_rad=phiv,
-                w0_cm1=float(_mode_state("iso")["w0"]),
-                workers=workers,
-                resolution_name=resolution_name,
+            _cached_bytes(
+                key,
+                lambda: _isofrequency_export_bytes(
+                    im_rpp=im_rpp,
+                    kxv_cm1=kxv,
+                    phiv_rad=phiv,
+                    w0_cm1=w0,
+                    workers=workers,
+                    resolution_name=resolution_name,
+                    stack=stack,
+                ),
             ),
-            f"{_stack_plot_filename_stem('isofrequency-rpp-export')}.txt",
+            f"{_stack_plot_filename_stem('isofrequency-rpp-export', stack)}.txt",
         )
     return None, None
 
 
 def _current_plot_image_payload() -> tuple[bytes | None, str | None]:
     mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
+    result_id = _displayed_result_id(mode)
+    colormap = str(st.session_state.get("plot_colormap", "Magma"))
     if mode == "Im(rpp) as f(w, kx)" and st.session_state.map_result is not None:
         wv, kxv, im_rpp = st.session_state.map_result
+        key = ("png-map", result_id, colormap)
         return (
-            _dispersion_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv),
+            _cached_bytes(key, lambda: _dispersion_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv)),
             f"{_stack_plot_filename_stem('im-rpp-map')}.png",
         )
     if mode == "Isofrequency surface" and st.session_state.iso_result is not None:
         phiv, kxv, im_rpp = st.session_state.iso_result
+        key = ("png-iso", result_id, colormap)
         return (
-            _isofrequency_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, phiv_rad=phiv),
+            _cached_bytes(key, lambda: _isofrequency_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, phiv_rad=phiv)),
             f"{_stack_plot_filename_stem('isofrequency-im-rpp')}.png",
         )
     return None, None
 
 
-def _render_map_plot(resolution_name: str, workers: int) -> bytes | None:
+def _render_map_plot(resolution_name: str, workers: int) -> None:
     _render_history_selector("map")
     if st.session_state.map_result is None:
         st.caption(":material/analytics: Run the computation to show the map.")
@@ -1054,10 +1106,9 @@ def _render_map_plot(resolution_name: str, workers: int) -> bytes | None:
     )
     if preview_caption:
         st.caption(preview_caption)
-    return _dispersion_export_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv, workers=workers, resolution_name=resolution_name)
 
 
-def _render_iso_plot(resolution_name: str, workers: int) -> bytes | None:
+def _render_iso_plot(resolution_name: str, workers: int) -> None:
     _render_history_selector("iso")
     if st.session_state.iso_result is None:
         st.caption(":material/radar: Run the computation to show the surface.")
@@ -1100,14 +1151,6 @@ def _render_iso_plot(resolution_name: str, workers: int) -> bytes | None:
     )
     if preview_caption:
         st.caption(preview_caption)
-    return _isofrequency_export_bytes(
-        im_rpp=im_rpp,
-        kxv_cm1=kxv,
-        phiv_rad=phiv,
-        w0_cm1=float(_mode_state("iso")["w0"]),
-        workers=workers,
-        resolution_name=resolution_name,
-    )
 
 
 def _render_metadata_tab() -> None:
@@ -1128,51 +1171,26 @@ def _render_metadata_tab() -> None:
 
 def _render_export_tab(resolution_name: str, workers: int) -> None:
     mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
-    if mode == "Im(rpp) as f(w, kx)" and st.session_state.map_result is not None:
-        wv, kxv, im_rpp = st.session_state.map_result
-        export_bytes = _dispersion_export_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv, workers=workers, resolution_name=resolution_name)
-        image_bytes = _dispersion_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv)
-        st.download_button(
-            "Download dispersion export",
-            data=export_bytes,
-            file_name=f"{_stack_plot_filename_stem('dispersion-rpp-export')}.txt",
-            mime="text/plain",
-            width="stretch",
-        )
-        st.download_button(
-            "Download plot image",
-            data=image_bytes,
-            file_name=f"{_stack_plot_filename_stem('im-rpp-map')}.png",
-            mime="image/png",
-            width="stretch",
-        )
-    elif mode == "Isofrequency surface" and st.session_state.iso_result is not None:
-        phiv, kxv, im_rpp = st.session_state.iso_result
-        export_bytes = _isofrequency_export_bytes(
-            im_rpp=im_rpp,
-            kxv_cm1=kxv,
-            phiv_rad=phiv,
-            w0_cm1=float(_mode_state("iso")["w0"]),
-            workers=workers,
-            resolution_name=resolution_name,
-        )
-        image_bytes = _isofrequency_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, phiv_rad=phiv)
-        st.download_button(
-            "Download isofrequency export",
-            data=export_bytes,
-            file_name=f"{_stack_plot_filename_stem('isofrequency-rpp-export')}.txt",
-            mime="text/plain",
-            width="stretch",
-        )
-        st.download_button(
-            "Download plot image",
-            data=image_bytes,
-            file_name=f"{_stack_plot_filename_stem('isofrequency-im-rpp')}.png",
-            mime="image/png",
-            width="stretch",
-        )
-    else:
+    export_bytes, export_name = _current_export_payload(resolution_name=resolution_name, workers=workers)
+    image_bytes, image_name = _current_plot_image_payload()
+    if export_bytes is None or image_bytes is None:
         st.caption("No computed result is available for export yet.")
+        return
+    data_label = "Download dispersion export" if mode == "Im(rpp) as f(w, kx)" else "Download isofrequency export"
+    st.download_button(
+        data_label,
+        data=export_bytes,
+        file_name=export_name,
+        mime="text/plain",
+        width="stretch",
+    )
+    st.download_button(
+        "Download plot image",
+        data=image_bytes,
+        file_name=image_name,
+        mime="image/png",
+        width="stretch",
+    )
 
 
 def render_results_panel() -> None:

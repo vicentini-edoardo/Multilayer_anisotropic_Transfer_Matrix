@@ -45,8 +45,8 @@ DEFAULT_LAYER_STACK: List[Dict[str, object]] = [
 
 EXAMPLE_LAYER_STACK: List[Dict[str, object]] = [
     _layer_record("layer_0", "vac", 0.0),
-    _layer_record("layer_2", "SiC", 0.1e-6),
-    _layer_record("layer_1", "Si", 0.0),
+    _layer_record("layer_1", "SiC", 0.1e-6),
+    _layer_record("layer_2", "Si", 0.0),
 ]
 
 

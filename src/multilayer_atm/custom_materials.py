@@ -191,16 +191,42 @@ def build_axis_response(axis_definition: Mapping[str, Any]) -> Callable[[np.ndar
     raise KeyError(f"Unsupported custom material axis source '{source_type}'.")
 
 
+_CUSTOM_AXES_CACHE: dict[str, tuple[Callable[[np.ndarray], np.ndarray], Callable[[np.ndarray], np.ndarray], Callable[[np.ndarray], np.ndarray], str]] = {}
+
+
+def _custom_note_from_mode(tensor_mode: str) -> str:
+    if tensor_mode == "isotropic":
+        return "Custom isotropic material"
+    return "Custom anisotropic diagonal material"
+
+
 def build_custom_axes(material_definition: Mapping[str, Any]) -> tuple[Callable[[np.ndarray], np.ndarray], Callable[[np.ndarray], np.ndarray], Callable[[np.ndarray], np.ndarray], str]:
-    """Build principal-axis callables for a full custom material definition."""
+    """Build principal-axis callables for a full custom material definition.
+
+    Results are cached on the serialized definition so that repeated stack
+    builds (e.g. one per angle of an isofrequency sweep) reuse the parsed
+    tables and oscillator closures instead of re-allocating them every call.
+    """
+    try:
+        cache_key = json.dumps(material_definition, sort_keys=True)
+    except TypeError:
+        cache_key = None
+    if cache_key is not None and cache_key in _CUSTOM_AXES_CACHE:
+        return _CUSTOM_AXES_CACHE[cache_key]
+
     axes = material_definition["axes"]
-    note = custom_material_note(str(material_definition["name"]), {str(material_definition["name"]): material_definition}) or "Custom material"
-    return (
+    note = _custom_note_from_mode(str(material_definition.get("tensor_mode", "anisotropic_diagonal"))) or "Custom material"
+    built = (
         build_axis_response(axes["xx"]),
         build_axis_response(axes["yy"]),
         build_axis_response(axes["zz"]),
         note,
     )
+    if cache_key is not None:
+        if len(_CUSTOM_AXES_CACHE) > 64:
+            _CUSTOM_AXES_CACHE.clear()
+        _CUSTOM_AXES_CACHE[cache_key] = built
+    return built
 
 
 def material_frequency_range_warnings(material_names: list[str], registry: Mapping[str, Mapping[str, Any]], w_min_cm1: float, w_max_cm1: float) -> list[str]:
@@ -210,11 +236,16 @@ def material_frequency_range_warnings(material_names: list[str], registry: Mappi
         definition = registry.get(material_name)
         if definition is None:
             continue
+        axes = definition.get("axes") or {}
         for axis_name in AXIS_NAMES:
-            axis_definition = definition["axes"][axis_name]
-            if axis_definition["source_type"] != "table":
+            axis_definition = axes.get(axis_name) or {}
+            if axis_definition.get("source_type") != "table":
                 continue
-            frequencies = np.asarray(axis_definition["table"]["frequency_cm1"], dtype=float)
+            table = axis_definition.get("table") or {}
+            frequency_values = table.get("frequency_cm1")
+            if not frequency_values:
+                continue
+            frequencies = np.asarray(frequency_values, dtype=float)
             if float(w_min_cm1) < float(frequencies[0]) or float(w_max_cm1) > float(frequencies[-1]):
                 warnings.append(
                     f"{material_name} ε{axis_name} table covers {frequencies[0]:.3f}–{frequencies[-1]:.3f} cm⁻¹; values outside this range are clamped to the nearest endpoint."

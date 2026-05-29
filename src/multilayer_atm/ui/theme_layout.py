@@ -128,6 +128,7 @@ def render_top_bar(status: dict[str, str] | None = None) -> None:
                         step=1,
                         key="worker_count",
                         label_visibility="collapsed",
+                        help="Parallel processes used for the computation. Values above the machine's core count give no extra speed-up.",
                     )
     st.markdown("</div>", unsafe_allow_html=True)
 
