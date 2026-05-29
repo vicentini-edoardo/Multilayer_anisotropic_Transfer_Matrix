@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Iterable, List, Tuple
 
@@ -82,7 +83,13 @@ class StackSpec:
         if len(self.layers) < 2:
             raise ValueError("A stack must contain at least two layers.")
         for i, layer in enumerate(self.layers):
+            if not str(layer.material).strip():
+                raise ValueError(f"Layer {i} has no material assigned.")
+            if not math.isfinite(layer.thickness_m):
+                raise ValueError(f"Layer {i} thickness must be a finite number.")
             if layer.thickness_m < 0:
                 raise ValueError(f"Layer {i} has negative thickness.")
             if len(layer.euler_deg) != 3:
                 raise ValueError(f"Layer {i} must provide three Euler angles.")
+            if not all(math.isfinite(angle) for angle in layer.euler_deg):
+                raise ValueError(f"Layer {i} has non-finite Euler angles.")

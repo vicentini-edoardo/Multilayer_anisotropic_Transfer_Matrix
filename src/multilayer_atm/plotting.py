@@ -333,6 +333,7 @@ def plot_polar_isofrequency(
     z: np.ndarray,
     title: str,
     cmap: str = "cividis",
+    radial_label: str = "kx (10^3 cm^-1)",
 ) -> plt.Figure:
     """Render a static Matplotlib polar isofrequency map for export."""
     phi = np.asarray(phi_rad, dtype=float)
@@ -352,6 +353,7 @@ def plot_polar_isofrequency(
     ax.set_rlim(0.0, radius.max())
     ax.grid(alpha=0.45)
     ax.set_rlabel_position(112)
+    ax.set_ylabel(radial_label, labelpad=24, fontsize=10)
     fig.tight_layout()
     return fig
 
