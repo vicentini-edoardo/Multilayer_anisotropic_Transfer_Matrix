@@ -207,7 +207,7 @@ def _get_worker_system(phi_offset_deg: float) -> GTM.System:
 
     stack = _deserialize_stack(_WORKER_STACK_PAYLOAD)
     if key != 0.0:
-        stack = stack.with_interior_alpha_offset(key)
+        stack = stack.with_interior_gamma_offset(key)
     system = _build_system(stack, custom_materials=_WORKER_STACK_PAYLOAD.get("custom_materials", {}))
     _WORKER_SYSTEM_CACHE[key] = system
     return system
@@ -388,7 +388,7 @@ def compute_isofreq_map(
     else:
         rpp = np.empty((len(phi_values), len(kx_values)), dtype=np.complex128)
         for i, phi_deg in enumerate(phi_offsets_deg):
-            local_stack = stack.with_interior_alpha_offset(float(phi_deg)) if global_phi_sweep else stack
+            local_stack = stack.with_interior_gamma_offset(float(phi_deg)) if global_phi_sweep else stack
             system = _build_system(local_stack, custom_materials=custom_materials)
             rpp[i, :] = _compute_row_with_system(system, float(w0), kx_values)
             if progress:

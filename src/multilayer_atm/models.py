@@ -60,7 +60,7 @@ class StackSpec:
         return StackSpec.from_layers(updated)
 
     def with_interior_alpha_offset(self, phi_deg: float) -> "StackSpec":
-        """Apply a common in-plane alpha offset to all layers."""
+        """Apply a common pre-tilt alpha offset to all layers."""
         shifted: List[LayerSpec] = []
         for layer in self.layers:
             alpha, beta, gamma = layer.euler_deg
@@ -69,6 +69,21 @@ class StackSpec:
                     material=layer.material,
                     thickness_m=layer.thickness_m,
                     euler_deg=(alpha + phi_deg, beta, gamma),
+                    doping=layer.doping,
+                )
+            )
+        return StackSpec.from_layers(shifted)
+
+    def with_interior_gamma_offset(self, phi_deg: float) -> "StackSpec":
+        """Apply a common post-tilt azimuthal offset to all layers."""
+        shifted: List[LayerSpec] = []
+        for layer in self.layers:
+            alpha, beta, gamma = layer.euler_deg
+            shifted.append(
+                LayerSpec(
+                    material=layer.material,
+                    thickness_m=layer.thickness_m,
+                    euler_deg=(alpha, beta, gamma + phi_deg),
                     doping=layer.doping,
                 )
             )
