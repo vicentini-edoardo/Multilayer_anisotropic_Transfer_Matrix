@@ -97,6 +97,16 @@ def _eps_sic4h_z(f_hz: np.ndarray) -> np.ndarray:
     )
 
 
+def _eps_hbn_z(f_hz: np.ndarray) -> np.ndarray:
+    return mat.eps_Lorentz(
+        np.asarray(f_hz),
+        760.0 * CM1_TO_HZ,
+        811.0 * CM1_TO_HZ,
+        1.0 * CM1_TO_HZ,
+        2.95,
+    )
+
+
 @lru_cache(maxsize=64)
 def _base_axes(material: str) -> MaterialAxes:
     m = material
@@ -135,7 +145,7 @@ def _base_axes(material: str) -> MaterialAxes:
     if m == "InN":
         return MaterialAxes(mat.eps_InNx, mat.eps_InNx, mat.eps_InNz)
     if m == "hBN":
-        return MaterialAxes(mat.eps_hBNx, mat.eps_hBNx, mat.eps_hBNz)
+        return MaterialAxes(mat.eps_hBNx, mat.eps_hBNx, _eps_hbn_z)
     if m == "SiO2":
         # pyGTM ships isotropic SiO2; MATLAB code uses anisotropic alpha-quartz tables.
         return MaterialAxes(mat.eps_SiO2, mat.eps_SiO2, mat.eps_SiO2, note="Isotropic pyGTM model")
