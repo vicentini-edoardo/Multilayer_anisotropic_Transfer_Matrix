@@ -231,6 +231,8 @@ def plot_heatmap(
     ylabel: str,
     title: str,
     cmap: str = "magma",
+    vmin: float | None = None,
+    vmax: float | None = None,
 ) -> plt.Figure:
     """Render a static Matplotlib dispersion heatmap for export."""
     xx = np.asarray(x)
@@ -244,6 +246,8 @@ def plot_heatmap(
         extent=[xx.min(), xx.max(), yy.min(), yy.max()],
         cmap=cmap,
         interpolation="nearest",
+        vmin=vmin,
+        vmax=vmax,
     )
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label("Im(rpp)")
@@ -264,6 +268,8 @@ def plot_heatmap_interactive(
     cmap: str = "Magma",
     height: int = 560,
     peak_overlay: dict[str, np.ndarray] | None = None,
+    zmin: float | None = None,
+    zmax: float | None = None,
 ):
     """Render an interactive Plotly dispersion heatmap for the Streamlit UI."""
     import plotly.graph_objects as go
@@ -278,6 +284,8 @@ def plot_heatmap_interactive(
                 y=yy,
                 z=zz,
                 colorscale=cmap,
+                zmin=zmin,
+                zmax=zmax,
                 colorbar=dict(
                     title="Im(rpp)",
                     x=1.03,
@@ -334,6 +342,8 @@ def plot_polar_isofrequency(
     title: str,
     cmap: str = "cividis",
     radial_label: str = "kx (10^3 cm^-1)",
+    vmin: float | None = None,
+    vmax: float | None = None,
 ) -> plt.Figure:
     """Render a static Matplotlib polar isofrequency map for export."""
     phi = np.asarray(phi_rad, dtype=float)
@@ -344,7 +354,7 @@ def plot_polar_isofrequency(
 
     fig = plt.figure(figsize=(7.4, 7.0), dpi=120)
     ax = fig.add_subplot(111, projection="polar")
-    mesh = ax.pcolormesh(theta_grid, r_grid, z, shading="auto", cmap=cmap)
+    mesh = ax.pcolormesh(theta_grid, r_grid, z, shading="auto", cmap=cmap, vmin=vmin, vmax=vmax)
     cbar = fig.colorbar(mesh, ax=ax, pad=0.12)
     cbar.set_label("Im(rpp)")
     ax.set_title(title, fontsize=12, weight="bold", pad=16)
@@ -367,6 +377,8 @@ def plot_polar_isofrequency_interactive(
     radial_label: str = "kx (cm^-1)",
     height: int = 640,
     peak_overlay: dict[str, np.ndarray] | None = None,
+    cmin: float | None = None,
+    cmax: float | None = None,
 ):
     """Render an interactive Plotly polar isofrequency map for the Streamlit UI."""
     import plotly.graph_objects as go
@@ -406,6 +418,8 @@ def plot_polar_isofrequency_interactive(
                 marker=dict(
                     color=bar_color,
                     colorscale=cmap,
+                    cmin=cmin,
+                    cmax=cmax,
                     colorbar=dict(
                         title="Im(rpp)",
                         x=1.03,

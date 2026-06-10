@@ -55,6 +55,9 @@ CALC_UI_STATE_KEYS = (
     "worker_count",
     "fast_preview_plots",
     "plot_colormap",
+    "plot_manual_color_limits",
+    "plot_color_min",
+    "plot_color_max",
     "show_peak_dots",
     "peak_dot_threshold_percent",
     "map_state",
@@ -70,6 +73,9 @@ def _initial_calc_defaults(speed_presets: Mapping[str, Mapping[str, Mapping[str,
         "worker_count": 4,
         "fast_preview_plots": True,
         "plot_colormap": "Magma",
+        "plot_manual_color_limits": False,
+        "plot_color_min": 0.0,
+        "plot_color_max": 1.0,
         "show_peak_dots": True,
         "peak_dot_threshold_percent": 10.0,
         "plot_refresh_nonce": 0,
@@ -324,6 +330,7 @@ def _isofrequency_export_bytes(
 
 
 def _dispersion_plot_png_bytes(im_rpp: np.ndarray, kxv_cm1: np.ndarray, wv_cm1: np.ndarray) -> bytes:
+    vmin, vmax = _active_plot_color_limits()
     fig = plot_heatmap(
         x=np.asarray(kx_cm1_to_ui(kxv_cm1), dtype=float),
         y=np.asarray(wv_cm1, dtype=float),
@@ -332,17 +339,22 @@ def _dispersion_plot_png_bytes(im_rpp: np.ndarray, kxv_cm1: np.ndarray, wv_cm1: 
         ylabel="w (cm⁻¹)",
         title="Im(rpp) map",
         cmap=str(PLOT_COLORMAPS[str(st.session_state.get("plot_colormap", "Magma"))]).lower(),
+        vmin=vmin,
+        vmax=vmax,
     )
     return _figure_png_bytes(fig)
 
 
 def _isofrequency_plot_png_bytes(im_rpp: np.ndarray, kxv_cm1: np.ndarray, phiv_rad: np.ndarray) -> bytes:
+    vmin, vmax = _active_plot_color_limits()
     fig = plot_polar_isofrequency(
         phi_rad=np.asarray(phiv_rad, dtype=float),
         kx=np.asarray(kx_cm1_to_ui(kxv_cm1), dtype=float),
         z=np.asarray(im_rpp, dtype=float),
         title="Isofrequency Im(rpp) polar surface",
         cmap=str(PLOT_COLORMAPS[str(st.session_state.get("plot_colormap", "Magma"))]).lower(),
+        vmin=vmin,
+        vmax=vmax,
     )
     return _figure_png_bytes(fig)
 
@@ -421,6 +433,61 @@ def validate_iso_inputs(
 def _render_validation_errors(errors: List[str]) -> None:
     for message in errors:
         st.caption(f":red[• {message}]")
+
+
+def _finite_color_limit_range(values: np.ndarray) -> tuple[float, float] | None:
+    finite_values = np.asarray(values, dtype=float)[np.isfinite(values)]
+    if finite_values.size == 0:
+        return None
+    return float(np.min(finite_values)), float(np.max(finite_values))
+
+
+def _current_plot_color_limit_source() -> np.ndarray | None:
+    mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
+    if mode == "Im(rpp) as f(w, kx)":
+        result = st.session_state.get("map_result")
+        if result is None:
+            return None
+        return np.asarray(result[2], dtype=float)
+    result = st.session_state.get("iso_result")
+    if result is None:
+        return None
+    return np.asarray(result[2], dtype=float)
+
+
+def _seed_manual_color_limits(values: np.ndarray | None = None) -> None:
+    source = _current_plot_color_limit_source() if values is None else np.asarray(values, dtype=float)
+    if source is None:
+        return
+    finite_range = _finite_color_limit_range(source)
+    if finite_range is None:
+        return
+    st.session_state.plot_color_min, st.session_state.plot_color_max = finite_range
+
+
+def _sync_manual_color_limits_toggle() -> None:
+    if bool(st.session_state.get("plot_manual_color_limits", False)):
+        _seed_manual_color_limits()
+
+
+def _active_plot_color_limits() -> tuple[float | None, float | None]:
+    if not bool(st.session_state.get("plot_manual_color_limits", False)):
+        return None, None
+    try:
+        vmin = float(st.session_state.get("plot_color_min"))
+        vmax = float(st.session_state.get("plot_color_max"))
+    except (TypeError, ValueError):
+        return None, None
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+        return None, None
+    return vmin, vmax
+
+
+def _manual_color_limits_invalid() -> bool:
+    if not bool(st.session_state.get("plot_manual_color_limits", False)):
+        return False
+    vmin, vmax = _active_plot_color_limits()
+    return vmin is None or vmax is None
 
 
 def _mode_state(mode: str) -> Dict[str, Any]:
@@ -947,18 +1014,38 @@ def _render_plot_toolbar(
 ) -> None:
     with st.container():
         st.caption(":material/tune: Plot controls")
-        settings_row = st.columns([0.30, 0.18, 0.18, 0.16, 0.18], gap=None, vertical_alignment="bottom")
+        settings_row = st.columns([0.20, 0.17, 0.15, 0.15, 0.12, 0.21], gap=None, vertical_alignment="bottom")
         with settings_row[0]:
             st.selectbox("Colormap", list(PLOT_COLORMAPS.keys()), key="plot_colormap")
         with settings_row[1]:
+            st.toggle(
+                "Manual colorscale",
+                key="plot_manual_color_limits",
+                disabled=not has_result,
+                on_change=_sync_manual_color_limits_toggle,
+            )
+        with settings_row[2]:
+            st.number_input(
+                "Min",
+                key="plot_color_min",
+                disabled=not has_result or not bool(st.session_state.get("plot_manual_color_limits", False)),
+            )
+        with settings_row[3]:
+            st.number_input(
+                "Max",
+                key="plot_color_max",
+                disabled=not has_result or not bool(st.session_state.get("plot_manual_color_limits", False)),
+            )
+        with settings_row[4]:
             st.toggle(
                 "Preview plots",
                 key="fast_preview_plots",
                 help="Downsamples only the displayed plot. Computation stays full resolution.",
             )
-        with settings_row[2]:
+        with settings_row[5]:
             st.toggle("Peak dots", key="show_peak_dots", disabled=not has_result)
-        with settings_row[3]:
+        threshold_row = st.columns([0.18, 0.82], gap=None, vertical_alignment="bottom")
+        with threshold_row[0]:
             st.number_input(
                 "Threshold %",
                 min_value=0.0,
@@ -967,9 +1054,11 @@ def _render_plot_toolbar(
                 key="peak_dot_threshold_percent",
                 disabled=not has_result or not bool(st.session_state.get("show_peak_dots", True)),
             )
-        with settings_row[4]:
+        with threshold_row[1]:
             freshness = "Current" if _results_are_current() else "Stale"
             st.caption(f":material/monitoring: State: {freshness}")
+            if _manual_color_limits_invalid():
+                st.caption(":red[Manual colorscale requires Max > Min. Plot display falls back to auto until fixed.]")
 
         action_row = st.columns([0.22, 0.26, 0.26, 0.26], gap=None, vertical_alignment="center")
         with action_row[0]:
@@ -1045,16 +1134,17 @@ def _current_plot_image_payload() -> tuple[bytes | None, str | None]:
     mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
     result_id = _displayed_result_id(mode)
     colormap = str(st.session_state.get("plot_colormap", "Magma"))
+    vmin, vmax = _active_plot_color_limits()
     if mode == "Im(rpp) as f(w, kx)" and st.session_state.map_result is not None:
         wv, kxv, im_rpp = st.session_state.map_result
-        key = ("png-map", result_id, colormap)
+        key = ("png-map", result_id, colormap, vmin, vmax)
         return (
             _cached_bytes(key, lambda: _dispersion_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv)),
             f"{_stack_plot_filename_stem('im-rpp-map')}.png",
         )
     if mode == "Isofrequency surface" and st.session_state.iso_result is not None:
         phiv, kxv, im_rpp = st.session_state.iso_result
-        key = ("png-iso", result_id, colormap)
+        key = ("png-iso", result_id, colormap, vmin, vmax)
         return (
             _cached_bytes(key, lambda: _isofrequency_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, phiv_rad=phiv)),
             f"{_stack_plot_filename_stem('isofrequency-im-rpp')}.png",
@@ -1087,6 +1177,7 @@ def _render_map_plot(resolution_name: str, workers: int) -> None:
         kx_plot = full_kx_ui
         w_plot = full_w
         z_plot = full_z
+    vmin, vmax = _active_plot_color_limits()
     fig = plot_heatmap_interactive(
         kx_plot,
         w_plot,
@@ -1097,6 +1188,8 @@ def _render_map_plot(resolution_name: str, workers: int) -> None:
         cmap=PLOT_COLORMAPS[str(st.session_state.get("plot_colormap", "Magma"))],
         height=455,
         peak_overlay=peak_overlay,
+        zmin=vmin,
+        zmax=vmax,
     )
     st.plotly_chart(
         fig,
@@ -1133,6 +1226,7 @@ def _render_iso_plot(resolution_name: str, workers: int) -> None:
         phi_plot = full_phi
         kx_plot = full_kx_ui
         z_plot = full_z
+    vmin, vmax = _active_plot_color_limits()
     fig = plot_polar_isofrequency_interactive(
         phi_plot,
         kx_plot,
@@ -1142,6 +1236,8 @@ def _render_iso_plot(resolution_name: str, workers: int) -> None:
         cmap=PLOT_COLORMAPS[str(st.session_state.get("plot_colormap", "Magma"))],
         height=455,
         peak_overlay=peak_overlay,
+        cmin=vmin,
+        cmax=vmax,
     )
     st.plotly_chart(
         fig,
