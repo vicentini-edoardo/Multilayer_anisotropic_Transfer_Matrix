@@ -917,6 +917,7 @@ def _active_compute_summary() -> tuple[List[str], List[str], int, str]:
 
 def _execute_active_compute(workers: int) -> None:
     mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)"))
+    fast = bool(st.session_state.get("fast_solver", True))
     st.session_state.compute_state = "Running"
     stack = build_stack_from_session()
     if mode == "Im(rpp) as f(w, kx)":
@@ -936,6 +937,7 @@ def _execute_active_compute(workers: int) -> None:
                 workers=int(workers),
                 progress=progress_cb,
                 custom_materials=custom_material_registry(),
+                fast=fast,
             ),
         )
         _append_map_history(wv, kxv, im_rpp)
@@ -960,6 +962,7 @@ def _execute_active_compute(workers: int) -> None:
             workers=int(workers),
             progress=progress_cb,
             custom_materials=custom_material_registry(),
+            fast=fast,
         ),
     )
     _append_iso_history(phiv, kxv, im_rpp)
@@ -984,6 +987,19 @@ def render_run_controls_panel(speed_presets: Mapping[str, Mapping[str, Mapping[s
             key="calc_mode",
         )
     workers = int(st.session_state.get("worker_count", 4))
+    st.session_state.setdefault("fast_solver", True)
+    st.toggle(
+        "Fast vectorised solver",
+        key="fast_solver",
+        help=(
+            "Evaluate each frequency/angle row with a vectorised transfer-matrix "
+            "solver instead of the per-point loop. Results are numerically identical "
+            "to the standard solver (matching to floating-point round-off); it is "
+            "typically 10-20x faster on dense grids. Any row it cannot handle falls "
+            "back automatically to the exact per-point evaluation. Turn off to force "
+            "the reference per-point solver."
+        ),
+    )
     errors, warnings, _, button_label = _active_compute_summary()
     for warning in warnings:
         st.warning(warning, icon=":material/warning:")

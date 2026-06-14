@@ -38,6 +38,20 @@ Two public entry points:
 
 Uses `ProcessPoolExecutor` (up to 4 workers) with serial fallback. Converts between Passler z-x-z Euler conventions and pyGTM conventions internally.
 
+Both entry points accept `fast=True` to use the vectorised solver in
+`solver_fast.py`, which evaluates an entire frequency/angle row across the kx axis
+in batched NumPy (one `np.linalg.eig` over all kx, batched 4×4 inverses/matmuls)
+instead of the per-point Python loop. It is numerically identical to the per-point
+path (matches to round-off) and ~10-20× faster on dense grids; rows it cannot
+handle fall back to the exact per-point evaluation. The GUI exposes this as the
+"Fast vectorised solver" toggle (default on).
+
+Note: pyGTM's `Layer` carries history-dependent state (a never-reset
+`_useBerreman` latch and a `gamma`/`Berreman` array alias). `_layer_ai` resets the
+flag and hands each evaluation a fresh `gamma` array so results are independent of
+grid iteration order and parallel chunking; the batched path reproduces the same
+clean per-point result.
+
 ### 3. UI (`src/multilayer_atm/ui/`)
 Streamlit composition split across:
 - `app.py` — top-level layout orchestration
