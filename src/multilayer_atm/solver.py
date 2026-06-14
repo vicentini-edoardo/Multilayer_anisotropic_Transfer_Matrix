@@ -201,6 +201,54 @@ def _worker_compute_mode_task(task: Tuple[int, float, float]) -> Tuple[int, comp
     return row_index, kx_complex, residual, converged
 
 
+def _continuation_over_frequencies(
+    system: engine.System, w_values_cm1: Sequence[float], kx_values_cm1: np.ndarray, fast: bool
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Trace one connected mode branch across a contiguous frequency segment.
+
+    Each frequency warm-starts :func:`solver_fast.find_rpp_zero` from the previous
+    frequency's converged reduced wavevector ``zeta``, which sits next to the new
+    zero so the search converges locally in a few iterations (and skips the real-kx
+    row scan entirely). When there is no usable warm start -- the segment's first
+    frequency, or after a frequency where the branch could not be continued -- it
+    falls back to :func:`_find_mode_for_frequency` (the grid-seeded dominant-zero
+    search), so the trace is never less robust than the per-frequency path.
+    """
+    n = len(w_values_cm1)
+    kx_mode = np.full(n, np.nan + 1j * np.nan, dtype=np.complex128)
+    residual = np.full(n, np.inf, dtype=float)
+    converged = np.zeros(n, dtype=bool)
+
+    prev_zeta: Optional[complex] = None
+    for i, w in enumerate(w_values_cm1):
+        w_cm1 = float(w)
+        f_hz = float(w_cm1 * CM1_TO_HZ)
+        conv = False
+        if prev_zeta is not None:
+            # Warm start: epsilon must be set, but the real-kx row is not needed.
+            system.initialize_sys(f_hz)
+            zeta, res, c = solver_fast.find_rpp_zero(system, f_hz, prev_zeta)
+            if c:
+                kx_mode[i], residual[i], converged[i] = complex(zeta * w_cm1), float(res), True
+                conv = True
+        if not conv:
+            kx_mode[i], residual[i], converged[i] = _find_mode_for_frequency(system, w_cm1, kx_values_cm1, fast)
+        prev_zeta = (kx_mode[i] / w_cm1) if converged[i] else None
+
+    return kx_mode, residual, converged
+
+
+def _worker_continuation_chunk_task(
+    task: Tuple[int, Tuple[float, ...], float],
+) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray]:
+    start_index, w_chunk, phi_offset_deg = task
+    if _WORKER_KX_VALUES_CM1 is None:
+        raise RuntimeError("Worker kx values not initialized.")
+    system = _get_worker_system(phi_offset_deg)
+    kx_mode, residual, converged = _continuation_over_frequencies(system, w_chunk, _WORKER_KX_VALUES_CM1, _WORKER_FAST)
+    return start_index, kx_mode, residual, converged
+
+
 
 def _deserialize_stack(payload: Dict[str, object]) -> StackSpec:
     from .models import DopingSpec
@@ -446,6 +494,67 @@ def _run_parallel_modes(
     return kx_mode, residual, converged
 
 
+def _run_continuation_parallel(
+    w_values_cm1: np.ndarray,
+    kx_values_cm1: np.ndarray,
+    stack_spec: StackSpec,
+    workers: int,
+    progress: ProgressCallback,
+    custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
+    fast: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Branch-continuation mode trace, parallelised over contiguous frequency chunks.
+
+    The frequency axis is split into ``workers`` contiguous segments; each segment
+    is traced by continuation (see :func:`_continuation_over_frequencies`). The
+    branch is continuous within a segment and re-seeded from the dominant zero at
+    each segment boundary, which keeps the cross-segment trace coherent while still
+    using every worker.
+    """
+    n = len(w_values_cm1)
+    kx_mode = np.full(n, np.nan + 1j * np.nan, dtype=np.complex128)
+    residual = np.full(n, np.inf, dtype=float)
+    converged = np.zeros(n, dtype=bool)
+
+    payload = _stack_to_worker_payload(stack_spec, custom_materials=custom_materials)
+    kx_array = np.asarray(kx_values_cm1, dtype=float)
+
+    if progress:
+        progress(0.0, "Tracing mode branch: scheduling workers")
+
+    segments = [seg for seg in np.array_split(np.arange(n), max(1, workers)) if seg.size]
+    tasks = [(int(seg[0]), tuple(float(w_values_cm1[i]) for i in seg), 0.0) for seg in segments]
+    pool = ProcessPoolExecutor(
+        max_workers=workers,
+        initializer=_worker_init,
+        initargs=(payload, kx_array, fast),
+    )
+    try:
+        done = 0
+        total = len(tasks)
+        for start_index, kx_seg, res_seg, conv_seg in pool.map(_worker_continuation_chunk_task, tasks):
+            seg_len = len(kx_seg)
+            kx_mode[start_index : start_index + seg_len] = kx_seg
+            residual[start_index : start_index + seg_len] = res_seg
+            converged[start_index : start_index + seg_len] = conv_seg
+            done += 1
+            if progress:
+                progress(done / total, f"Tracing mode branch: {done}/{total} segments")
+    except (BrokenProcessPool, OSError):
+        pool.shutdown(wait=False, cancel_futures=True)
+        if progress:
+            progress(0.0, "Tracing mode branch: parallel unavailable, falling back to serial")
+        system = _build_system(stack_spec, custom_materials=payload.get("custom_materials", {}))
+        kx_mode, residual, converged = _continuation_over_frequencies(system, [float(w) for w in w_values_cm1], kx_array, fast)
+    except BaseException:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    else:
+        pool.shutdown(wait=True, cancel_futures=False)
+
+    return kx_mode, residual, converged
+
+
 def compute_mode_dispersion(
     stack_spec: StackSpec,
     w_min: float,
@@ -458,17 +567,27 @@ def compute_mode_dispersion(
     progress: ProgressCallback = None,
     custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
     fast: bool = False,
+    continuous: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Trace the optical mode (complex zero of rpp) as a function of frequency.
 
-    For each frequency the reduced wavevector ``zeta`` that solves ``rpp(zeta) = 0``
-    is found: the ``|rpp|`` minimum on the real ``kx`` grid seeds a complex-plane
-    Newton refinement. The returned ``kx_mode`` is complex (``zeta * w`` in cm⁻¹);
-    its real part is the mode wavevector and its imaginary part the modal loss.
+    Two tracing modes are available:
 
-    Returns ``(w_values, kx_mode_cm1, residual, converged)``. ``residual`` is the
-    final ``|rpp|`` and ``converged`` flags the frequencies where the search reached
-    a genuine zero (callers should drop the rest).
+    * ``continuous=False`` (default, "dominant zero") -- each frequency is solved
+      independently: the ``|rpp|`` minimum on the real ``kx`` grid seeds a
+      complex-plane Newton refinement. The trace follows the strongest reflectivity
+      zero at each frequency (matching the bright Im(rpp) feature) and may jump
+      between modes where the dominant zero changes branch.
+    * ``continuous=True`` ("continuous branch") -- each frequency warm-starts from
+      the previous one's zero, so the trace follows a single mode branch smoothly
+      (and faster, since the local search skips the real-kx row scan). It falls back
+      to the dominant-zero search whenever the branch cannot be continued.
+
+    The returned ``kx_mode`` is complex (``zeta * w`` in cm⁻¹); its real part is the
+    mode wavevector and its imaginary part the modal loss. Returns
+    ``(w_values, kx_mode_cm1, residual, converged)`` where ``residual`` is the final
+    ``|rpp|`` and ``converged`` flags the frequencies that reached a genuine zero
+    (callers should drop the rest).
     """
     stack = stack_spec.enforce_boundary_layers()
     stack.validate()
@@ -479,7 +598,23 @@ def compute_mode_dispersion(
     if workers is None:
         workers = _default_workers()
 
-    if workers > 1:
+    if continuous:
+        if workers > 1:
+            kx_mode, residual, converged = _run_continuation_parallel(
+                w_values,
+                kx_values,
+                stack,
+                workers=workers,
+                progress=progress,
+                custom_materials=custom_materials,
+                fast=fast,
+            )
+        else:
+            system = _build_system(stack, custom_materials=custom_materials)
+            kx_mode, residual, converged = _continuation_over_frequencies(
+                system, [float(w) for w in w_values], kx_values, fast
+            )
+    elif workers > 1:
         kx_mode, residual, converged = _run_parallel_modes(
             w_values,
             kx_values,

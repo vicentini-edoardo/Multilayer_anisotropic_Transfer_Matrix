@@ -36,9 +36,16 @@ Frozen dataclasses: `DopingSpec` → `LayerSpec` → `StackSpec`. These are the 
 - `compute_rpp_map()` — dispersion map: Im(rpp) as f(ω, kx)
 - `compute_isofreq_map()` — isofrequency diagram: Im(rpp) as f(φ, kx) at fixed ω
 - `compute_mode_dispersion()` — mode trace: the complex in-plane wavevector kx where
-  rpp = 0, as f(ω). Per frequency it seeds from the |rpp| minimum on the real kx grid
-  and refines into the complex plane via `solver_fast.find_rpp_zero` (damped Newton).
-  The UI overlays Re(kx) on the dispersion map ("Mode trace (rpp=0)" toggle).
+  rpp = 0, as f(ω), refined into the complex plane via `solver_fast.find_rpp_zero`
+  (damped Newton). Two tracing modes (`continuous` flag): "dominant zero" (default)
+  seeds each frequency independently from the |rpp| minimum on the real kx grid, so
+  the trace follows the strongest reflectivity zero (matching the bright Im(rpp)
+  feature) and may jump between modes; "continuous branch" warm-starts each frequency
+  from the previous one's zero to follow a single mode smoothly (and faster, skipping
+  the row scan), falling back to the dominant-zero search where the branch breaks.
+  The continuous path is parallelised over contiguous frequency chunks. The UI
+  overlays Re(kx) on the dispersion map ("Mode trace (rpp=0)" toggle + "Trace mode"
+  selector).
 
 Uses `ProcessPoolExecutor` (up to 4 workers) with serial fallback. Converts the
 Passler z-x-z Euler angles to the (theta, phi, psi) ordering the engine expects

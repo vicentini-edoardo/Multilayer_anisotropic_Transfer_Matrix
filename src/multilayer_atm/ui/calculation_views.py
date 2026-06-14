@@ -61,9 +61,12 @@ CALC_UI_STATE_KEYS = (
     "show_peak_dots",
     "peak_dot_threshold_percent",
     "show_mode_trace",
+    "mode_trace_method",
     "map_state",
     "iso_state",
 )
+
+MODE_TRACE_METHODS = ("Dominant zero", "Continuous branch")
 
 def _initial_calc_defaults(speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]]) -> Dict[str, Any]:
     default_preset = "Normal" if "Normal" in speed_presets else next(iter(speed_presets))
@@ -80,6 +83,7 @@ def _initial_calc_defaults(speed_presets: Mapping[str, Mapping[str, Mapping[str,
         "show_peak_dots": True,
         "peak_dot_threshold_percent": 10.0,
         "show_mode_trace": False,
+        "mode_trace_method": "Dominant zero",
         "plot_refresh_nonce": 0,
         "compute_state": "Idle",
         "last_compute_signature": None,
@@ -850,13 +854,16 @@ def _map_mode_trace_data(
     phi0 = float(_mode_state("map").get("phi0", 0.0))
     fast = bool(st.session_state.get("fast_solver", True))
     workers = int(st.session_state.get("worker_count", 4))
+    method = str(st.session_state.get("mode_trace_method", "Dominant zero"))
+    continuous = method == "Continuous branch"
 
     cache: Dict[tuple, tuple] = st.session_state.setdefault("_mode_trace_cache", {})
-    key = (str(result_id), hash(stack), phi0, fast, int(wv.size), int(kxv.size))
+    key = (str(result_id), hash(stack), phi0, fast, continuous, int(wv.size), int(kxv.size))
     cached = cache.get(key)
     if cached is None:
         stack_for_run = stack.with_interior_alpha_offset(phi0)
-        with st.spinner("Locating reflectivity zeros (rpp=0)..."):
+        spinner_msg = "Tracing mode branch (rpp=0)..." if continuous else "Locating reflectivity zeros (rpp=0)..."
+        with st.spinner(spinner_msg):
             _w, kx_mode, residual, converged = compute_mode_dispersion(
                 stack_for_run,
                 w_min=float(wv[0]),
@@ -868,6 +875,7 @@ def _map_mode_trace_data(
                 workers=workers,
                 custom_materials=custom_material_registry(),
                 fast=fast,
+                continuous=continuous,
             )
         cached = (
             np.asarray(kx_mode, dtype=np.complex128),
@@ -1182,7 +1190,8 @@ def _render_plot_toolbar(
 
         is_map_mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)")) == "Im(rpp) as f(w, kx)"
         map_has_result = is_map_mode and st.session_state.get("map_result") is not None
-        mode_row = st.columns([0.30, 0.70], gap=None, vertical_alignment="bottom")
+        trace_on = map_has_result and bool(st.session_state.get("show_mode_trace", False))
+        mode_row = st.columns([0.26, 0.30, 0.44], gap=None, vertical_alignment="bottom")
         with mode_row[0]:
             st.toggle(
                 "Mode trace (rpp=0)",
@@ -1197,7 +1206,21 @@ def _render_plot_toolbar(
                 ),
             )
         with mode_row[1]:
-            if map_has_result and bool(st.session_state.get("show_mode_trace", False)):
+            st.selectbox(
+                "Trace mode",
+                MODE_TRACE_METHODS,
+                key="mode_trace_method",
+                disabled=not trace_on,
+                help=(
+                    "'Dominant zero': the strongest reflectivity zero at each frequency "
+                    "(follows the bright Im(rpp) feature; may jump between modes at band "
+                    "edges). 'Continuous branch': warm-starts each frequency from the "
+                    "previous one to follow a single mode smoothly across frequency "
+                    "(faster), falling back to the dominant zero where the branch breaks."
+                ),
+            )
+        with mode_row[2]:
+            if trace_on:
                 wv, kxv, _im = st.session_state.map_result
                 trace_bytes = _mode_trace_export_bytes(wv, kxv)
                 if trace_bytes is not None:
