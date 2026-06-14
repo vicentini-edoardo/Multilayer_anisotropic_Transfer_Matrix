@@ -157,11 +157,57 @@ def _clean_small(values: np.ndarray) -> np.ndarray:
     return out
 
 
+def _isotropic_qs_gamma(eps: complex, mu: complex, z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Closed-form qs/gamma for an isotropic layer (eps scalar).
+
+    For a scalar tensor the Berreman matrix is block-diagonal and all four modes
+    are q = +/- sqrt(eps*mu - zeta^2), forward modes doubly degenerate. This
+    reproduces, in closed form, exactly what the eigen path produces in its
+    degenerate non-birefringent branch (p-mode at index 0/2, s-mode at index 1/3),
+    so it is numerically identical while skipping np.linalg.eig and the mode sort.
+    """
+    n = z.shape[0]
+    D = mu * eps - z ** 2
+    # +sqrt is the forward (transmitted) branch under the same sign convention the
+    # eigen path's mode sort uses (Re>0, or Im>=0 for evanescent samples).
+    qt = np.sqrt(D)
+
+    qs = np.empty((n, 4), dtype=np.complex128)
+    qs[:, 0] = qt
+    qs[:, 1] = qt
+    qs[:, 2] = -qt
+    qs[:, 3] = -qt
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        g_p = -(z * qt) / D  # gamma13 (forward p) == gamma33 (backward p) here
+
+    ones = np.ones(n, dtype=np.complex128)
+    zeros = np.zeros(n, dtype=np.complex128)
+    gamma = np.stack(
+        [
+            np.stack([ones, zeros, g_p], axis=-1),    # forward p
+            np.stack([zeros, ones, zeros], axis=-1),  # forward s
+            np.stack([-ones, zeros, g_p], axis=-1),   # backward p
+            np.stack([zeros, ones, zeros], axis=-1),  # backward s
+        ],
+        axis=1,
+    )
+    norms = np.linalg.norm(gamma, axis=-1, keepdims=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        gamma = gamma / norms
+    return qs, gamma
+
+
 def _batched_qs_gamma(layer: engine.Layer, z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Return sorted out-of-plane wavevectors qs (N, 4) and field matrix gamma (N, 4, 3)."""
     epsilon = layer.epsilon
     mu = layer.mu
     n = z.shape[0]
+
+    # Isotropic layers (vacuum/air, cubic crystals, metals, ...) have analytic
+    # modes; skip the eigen-decomposition and mode-sorting entirely.
+    if getattr(layer, "is_isotropic", False):
+        return _isotropic_qs_gamma(epsilon[0, 0], mu, z)
 
     delta, (a20, a21, a24, a51) = _batched_delta(epsilon, mu, z)
 

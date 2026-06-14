@@ -55,6 +55,10 @@ class Layer:
         self.thick = float(thickness)
         self.mu = 1.0 + 0.0j
         self.epsilon = np.identity(3, dtype=np.complex128)
+        # Whether the (rotated) tensor is a scalar multiple of the identity. Set by
+        # calculate_epsilon; lets the engine use closed-form isotropic modes and
+        # skip the 4x4 eigen-decomposition. Defaults True (vacuum identity tensor).
+        self.is_isotropic = True
 
         self._eps1: EpsFunc = epsilon1 if epsilon1 is not None else vacuum_eps
         self._eps2: EpsFunc = epsilon2 if epsilon2 is not None else self._eps1
@@ -86,6 +90,19 @@ class Layer:
             np.array([self._eps1(f), self._eps2(f), self._eps3(f)], dtype=np.complex128)
         )
         self.epsilon = self.euler_inv @ (eps_xtal @ self.euler)
+
+        # Classify isotropy from the resulting tensor: a rotated isotropic medium
+        # stays scalar (R^-1 (eps I) R = eps I), so off-diagonals and the spread of
+        # the diagonal vanish to round-off. This also catches doped/custom isotropic
+        # materials whose axis functions are not the same object.
+        e = self.epsilon
+        scale = abs(e[0, 0]) + abs(e[1, 1]) + abs(e[2, 2])
+        off = (
+            abs(e[0, 1]) + abs(e[0, 2]) + abs(e[1, 0])
+            + abs(e[1, 2]) + abs(e[2, 0]) + abs(e[2, 1])
+        )
+        spread = abs(e[0, 0] - e[1, 1]) + abs(e[0, 0] - e[2, 2])
+        self.is_isotropic = (off + spread) <= 1e-12 * scale
         return self.epsilon
 
 

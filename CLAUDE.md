@@ -46,7 +46,10 @@ The numerical engine is **in-house and does not import pyGTM at runtime**:
 - `solver_fast.py` — the 4×4 transfer-matrix algorithm (Passler & Paarmann 2017)
   in batched NumPy. `compute_row_batched()` evaluates a whole ω/φ row across the
   kx axis at once (one `np.linalg.eig` over all kx, batched 4×4 inverses/matmuls);
-  `compute_row_pointwise()` evaluates each kx sample independently.
+  `compute_row_pointwise()` evaluates each kx sample independently. Isotropic
+  layers (detected via `Layer.is_isotropic`) skip the eigen-decomposition entirely
+  and use the closed-form modes `q = ±√(εμ − ζ²)` — `eig` is ~half the batched
+  runtime, so this saves ~25% per isotropic layer (air boundaries are ubiquitous).
 
 `fast=True` (default in the GUI, "Fast vectorised solver" toggle) uses the batched
 path; `fast=False` uses the per-point path. They agree to round-off, and the
