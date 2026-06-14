@@ -104,7 +104,9 @@ Runtime dependencies are declared in both `requirements.txt` and `pyproject.toml
 - `scipy`
 - `matplotlib`
 - `plotly`
-- `pyGTM`
+- `pyGTM` (GPL-3.0) — still required at runtime for the built-in material models
+  (`materials.py`); the transfer-matrix engine no longer uses it. See the
+  [License](#license) note.
 
 ## Original code and references
 
@@ -131,4 +133,20 @@ CIC nanoGUNE
 
 ## License
 
-This project is distributed under the MIT License. See [`LICENSE`](LICENSE).
+The source code in this repository is distributed under the MIT License. See
+[`LICENSE`](LICENSE).
+
+**Third-party licensing note.** The transfer-matrix engine
+(`multilayer_atm/engine.py` and `multilayer_atm/solver_fast.py`) is now an
+independent in-house implementation and does **not** import pyGTM at runtime.
+However, the project still depends on [`pyGTM`](https://github.com/pyMatJ/pyGTM)
+(© M. Jeannin, **GPL-3.0**) at runtime through the built-in material models in
+`multilayer_atm/materials.py`, and uses it as a validation reference in the test
+suite. Because pyGTM is GPL-3.0, any distribution that bundles or requires it
+forms a combined work governed by the GPL-3.0 terms, notwithstanding the MIT
+license on this repository's own code. This will be resolved by replacing the
+remaining pyGTM-based material models with clean-room implementations sourced from
+the primary literature, after which the project will be MIT-clean end to end.
+
+This is an informational summary, not legal advice; seek a qualified opinion
+before redistribution.

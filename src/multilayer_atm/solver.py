@@ -9,16 +9,9 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
+from . import engine, solver_fast
 from .materials import CM1_TO_HZ, axes_for_material
 from .models import LayerSpec, StackSpec
-
-try:
-    import GTM.GTMcore as GTM  # type: ignore
-except Exception as exc:  # pragma: no cover - exercised by runtime environment setup
-    raise ImportError(
-        "pyGTM is required but not importable. Install a compatible pyGTM package "
-        "(for example via `pip install \"pyGTM @ git+https://github.com/pyMatJ/pyGTM.git@7a228b7314ea66ae025ff346c0d0e8bfb86cc82c\"`) and retry."
-    ) from exc
 
 
 ProgressCallback = Optional[Callable[[float, str], None]]
@@ -30,18 +23,10 @@ ProgressCallback = Optional[Callable[[float, str], None]]
 # the user instead of producing a misleading all-zero map.
 _NUMERICAL_ERRORS = (np.linalg.LinAlgError, FloatingPointError, ZeroDivisionError, ValueError)
 
-# Small imaginary part used to lift zeta off the real axis when the in-plane
-# momentum is purely real, which avoids pyGTM mode-sorting singular branches.
-_ZETA_IMAG_REG = 1e-14
-
-DELTA1234 = np.array(
-    [[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]],
-    dtype=np.complex128,
-)
-
 _WORKER_STACK_PAYLOAD: Optional[Dict[str, object]] = None
 _WORKER_KX_VALUES_CM1: Optional[np.ndarray] = None
-_WORKER_SYSTEM_CACHE: Dict[float, GTM.System] = {}
+_WORKER_SYSTEM_CACHE: Dict[float, engine.System] = {}
+_WORKER_FAST: bool = False
 
 
 def cm1_to_hz(values_cm1: np.ndarray | float) -> np.ndarray:
@@ -83,9 +68,9 @@ def _default_workers() -> int:
     return max(1, min(4, cpu))
 
 
-def _build_system(stack_spec: StackSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> GTM.System:
+def _build_system(stack_spec: StackSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> engine.System:
     stack = stack_spec.enforce_boundary_layers()
-    system = GTM.System()
+    system = engine.System()
 
     layers = list(stack.layers)
     super_layer = _build_layer(layers[0], custom_materials=custom_materials)
@@ -99,10 +84,10 @@ def _build_system(stack_spec: StackSpec, custom_materials: Mapping[str, Mapping[
     return system
 
 
-def _build_layer(layer_spec: LayerSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> GTM.Layer:
+def _build_layer(layer_spec: LayerSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> engine.Layer:
     axes = axes_for_material(layer_spec.material, layer_spec.doping, custom_materials=custom_materials)
     theta, phi, psi = passler_to_pygtm_euler(layer_spec.euler_deg)
-    return GTM.Layer(
+    return engine.Layer(
         thickness=float(layer_spec.thickness_m),
         epsilon1=axes.fx,
         epsilon2=axes.fy,
@@ -113,61 +98,21 @@ def _build_layer(layer_spec: LayerSpec, custom_materials: Mapping[str, Mapping[s
     )
 
 
-def _update_layer_no_eps(layer: GTM.Layer, f_hz: float, zeta: complex) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    layer.calculate_matrices(zeta)
-    layer.calculate_q()
-    layer.calculate_gamma(zeta)
-    layer.calculate_transfer_matrix(f_hz, zeta)
-    ai = layer.Ai
-    ai_inv = GTM.exact_inv(ai)
-    return ai, ai_inv, layer.Ti
+def _compute_row(system: engine.System, w_cm1: float, kx_cm1: np.ndarray, fast: bool) -> np.ndarray:
+    """Compute one Im(rpp) row with the in-house transfer-matrix engine.
 
-
-def _calculate_gamma_star_no_eps(system: GTM.System, f_hz: float, zeta: complex) -> np.ndarray:
-    _, ai_inv_super, _ = _update_layer_no_eps(system.superstrate, f_hz, zeta)
-    ai_sub, _, _ = _update_layer_no_eps(system.substrate, f_hz, zeta)
-
-    tloc = np.identity(4, dtype=np.complex128)
-    for ii in range(len(system.layers) - 1, -1, -1):
-        _, _, ti = _update_layer_no_eps(system.layers[ii], f_hz, zeta)
-        tloc = ti @ tloc
-
-    gamma = ai_inv_super @ (tloc @ ai_sub)
-    gamma_star = DELTA1234 @ (gamma @ DELTA1234)
-    return gamma_star
-
-
-def _rpp_from_gamma_star(gamma_star: np.ndarray) -> complex:
-    denom = gamma_star[0, 0] * gamma_star[2, 2] - gamma_star[0, 2] * gamma_star[2, 0]
-    if denom == 0 or not np.isfinite(denom):
-        return 0.0 + 0.0j
-    rpp = gamma_star[1, 0] * gamma_star[2, 2] - gamma_star[1, 2] * gamma_star[2, 0]
-    out = rpp / denom
-    if not np.isfinite(out):
-        return 0.0 + 0.0j
-    return out
-
-
-def _compute_row_with_system(system: GTM.System, w_cm1: float, kx_cm1: np.ndarray) -> np.ndarray:
-    f_hz = float(cm1_to_hz(w_cm1))
-    system.initialize_sys(f_hz)
-    row = np.empty(kx_cm1.shape[0], dtype=np.complex128)
-    zeta = np.asarray(kx_cm1, dtype=float) * (1.0 / float(w_cm1))
-    for j, z in enumerate(zeta):
-        # Preserve a genuine imaginary momentum (evanescent input) when present;
-        # otherwise lift the purely real value off the singular branch.
-        z_imag = float(np.imag(z))
-        z_reg = complex(float(np.real(z)), z_imag if z_imag != 0.0 else _ZETA_IMAG_REG)
-        try:
-            gamma_star = _calculate_gamma_star_no_eps(system, f_hz, z_reg)
-        except _NUMERICAL_ERRORS:
-            try:
-                gamma_star = system.calculate_GammaStar(f_hz, z_reg)
-            except _NUMERICAL_ERRORS:
-                row[j] = 0.0 + 0.0j
-                continue
-        row[j] = _rpp_from_gamma_star(gamma_star)
-    return row
+    ``fast`` selects the vectorised whole-row evaluation; otherwise each kx sample
+    is evaluated independently. Both use the same engine and agree to floating-point
+    round-off. When the vectorised path rejects a row (an ill-conditioned sample
+    that breaks the batched mode sort) it transparently falls back to the per-point
+    path, so enabling ``fast`` never changes the result.
+    """
+    if not fast:
+        return solver_fast.compute_row_pointwise(system, w_cm1, kx_cm1)
+    try:
+        return solver_fast.compute_row_batched(system, w_cm1, kx_cm1)
+    except (solver_fast.FastPathUnavailable, *_NUMERICAL_ERRORS):
+        return solver_fast.compute_row_pointwise(system, w_cm1, kx_cm1)
 
 
 def _stack_to_worker_payload(stack_spec: StackSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> Dict[str, object]:
@@ -189,14 +134,15 @@ def _stack_to_worker_payload(stack_spec: StackSpec, custom_materials: Mapping[st
     }
 
 
-def _worker_init(stack_payload: Dict[str, object], kx_values_cm1: np.ndarray) -> None:
-    global _WORKER_STACK_PAYLOAD, _WORKER_KX_VALUES_CM1, _WORKER_SYSTEM_CACHE
+def _worker_init(stack_payload: Dict[str, object], kx_values_cm1: np.ndarray, fast: bool) -> None:
+    global _WORKER_STACK_PAYLOAD, _WORKER_KX_VALUES_CM1, _WORKER_SYSTEM_CACHE, _WORKER_FAST
     _WORKER_STACK_PAYLOAD = stack_payload
     _WORKER_KX_VALUES_CM1 = np.asarray(kx_values_cm1, dtype=float)
     _WORKER_SYSTEM_CACHE = {}
+    _WORKER_FAST = bool(fast)
 
 
-def _get_worker_system(phi_offset_deg: float) -> GTM.System:
+def _get_worker_system(phi_offset_deg: float) -> engine.System:
     if _WORKER_STACK_PAYLOAD is None:
         raise RuntimeError("Worker stack payload not initialized.")
 
@@ -218,7 +164,7 @@ def _worker_compute_row_task(task: Tuple[int, float, float]) -> Tuple[int, np.nd
     if _WORKER_KX_VALUES_CM1 is None:
         raise RuntimeError("Worker kx values not initialized.")
     system = _get_worker_system(phi_offset_deg)
-    row = _compute_row_with_system(system, w_cm1, _WORKER_KX_VALUES_CM1)
+    row = _compute_row(system, w_cm1, _WORKER_KX_VALUES_CM1, _WORKER_FAST)
     return row_index, row
 
 
@@ -254,6 +200,7 @@ def _run_parallel_rows(
     progress: ProgressCallback,
     progress_label: str,
     custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
+    fast: bool = False,
 ) -> np.ndarray:
     out = np.empty((len(w_values_cm1), len(kx_values_cm1)), dtype=np.complex128)
     payload = _stack_to_worker_payload(stack_spec, custom_materials=custom_materials)
@@ -267,7 +214,7 @@ def _run_parallel_rows(
     pool = ProcessPoolExecutor(
         max_workers=workers,
         initializer=_worker_init,
-        initargs=(payload, kx_array),
+        initargs=(payload, kx_array, fast),
     )
     try:
         done = 0
@@ -281,7 +228,7 @@ def _run_parallel_rows(
         pool.shutdown(wait=False, cancel_futures=True)
         if progress:
             progress(0.0, f"{progress_label}: parallel unavailable, falling back to serial")
-        system_cache: Dict[float, GTM.System] = {}
+        system_cache: Dict[float, engine.System] = {}
         total = len(tasks)
         for done, (i, w, phi_off) in enumerate(tasks, start=1):
             system = system_cache.get(phi_off)
@@ -289,7 +236,7 @@ def _run_parallel_rows(
                 local_stack = stack_spec.with_interior_alpha_offset(phi_off) if phi_off != 0.0 else stack_spec
                 system = _build_system(local_stack, custom_materials=payload.get("custom_materials", {}))
                 system_cache[phi_off] = system
-            out[i, :] = _compute_row_with_system(system, w, kx_array)
+            out[i, :] = _compute_row(system, w, kx_array, fast)
             if progress:
                 progress(done / total, f"{progress_label}: {done}/{total} rows (serial fallback)")
     except BaseException:
@@ -313,8 +260,13 @@ def compute_rpp_map(
     workers: Optional[int] = None,
     progress: ProgressCallback = None,
     custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
+    fast: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute Im(rpp) on a regular dispersion grid in (w, kx)."""
+    """Compute Im(rpp) on a regular dispersion grid in (w, kx).
+
+    When ``fast`` is set the vectorised per-row solver is used; it is numerically
+    identical to the default per-point solver but markedly faster on dense grids.
+    """
     stack = stack_spec.enforce_boundary_layers()
     stack.validate()
 
@@ -334,12 +286,13 @@ def compute_rpp_map(
             progress=progress,
             progress_label="Computing Im(rpp)(w,kx)",
             custom_materials=custom_materials,
+            fast=fast,
         )
     else:
         system = _build_system(stack, custom_materials=custom_materials)
         rpp = np.empty((len(w_values), len(kx_values)), dtype=np.complex128)
         for i, w in enumerate(w_values):
-            rpp[i, :] = _compute_row_with_system(system, float(w), kx_values)
+            rpp[i, :] = _compute_row(system, float(w), kx_values, fast)
             if progress:
                 progress((i + 1) / len(w_values), f"Computing Im(rpp)(w,kx): {i + 1}/{len(w_values)} rows")
 
@@ -359,8 +312,13 @@ def compute_isofreq_map(
     workers: Optional[int] = None,
     progress: ProgressCallback = None,
     custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
+    fast: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute Im(rpp) on a regular isofrequency grid in (phi, kx)."""
+    """Compute Im(rpp) on a regular isofrequency grid in (phi, kx).
+
+    When ``fast`` is set the vectorised per-row solver is used; it is numerically
+    identical to the default per-point solver but markedly faster on dense grids.
+    """
     stack = stack_spec.enforce_boundary_layers()
     stack.validate()
 
@@ -384,13 +342,14 @@ def compute_isofreq_map(
             progress=progress,
             progress_label="Computing isofrequency Im(rpp)(phi,kx)",
             custom_materials=custom_materials,
+            fast=fast,
         )
     else:
         rpp = np.empty((len(phi_values), len(kx_values)), dtype=np.complex128)
         for i, phi_deg in enumerate(phi_offsets_deg):
             local_stack = stack.with_interior_gamma_offset(float(phi_deg)) if global_phi_sweep else stack
             system = _build_system(local_stack, custom_materials=custom_materials)
-            rpp[i, :] = _compute_row_with_system(system, float(w0), kx_values)
+            rpp[i, :] = _compute_row(system, float(w0), kx_values, fast)
             if progress:
                 progress((i + 1) / len(phi_values), f"Computing isofrequency Im(rpp): {i + 1}/{len(phi_values)} angles")
 
