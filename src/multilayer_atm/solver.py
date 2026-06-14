@@ -168,6 +168,39 @@ def _worker_compute_row_task(task: Tuple[int, float, float]) -> Tuple[int, np.nd
     return row_index, row
 
 
+def _find_mode_for_frequency(
+    system: engine.System, w_cm1: float, kx_values_cm1: np.ndarray, fast: bool
+) -> Tuple[complex, float, bool]:
+    """Locate the complex kx where rpp = 0 at a single frequency.
+
+    The real-kx row gives the starting guess (the kx of minimum |rpp|), which is
+    then refined into the complex plane by :func:`solver_fast.find_rpp_zero`.
+    Returns ``(kx_complex_cm1, residual, converged)``; ``kx_complex_cm1`` is
+    ``zeta * w`` in cm⁻¹ (real part = mode wavevector, imaginary part = loss).
+    """
+    f_hz = float(w_cm1 * CM1_TO_HZ)
+    # Evaluates the row (which initialises the system at f_hz) and gives the
+    # coarse grid guess for the zero.
+    row = _compute_row(system, w_cm1, kx_values_cm1, fast)
+    mag = np.abs(np.asarray(row))
+    finite = np.isfinite(mag)
+    if not np.any(finite):
+        return complex(np.nan, np.nan), float("inf"), False
+    j0 = int(np.argmin(np.where(finite, mag, np.inf)))
+    zeta0 = complex(float(kx_values_cm1[j0]) / float(w_cm1), 0.0)
+    zeta, residual, converged = solver_fast.find_rpp_zero(system, f_hz, zeta0)
+    return complex(zeta * w_cm1), float(residual), bool(converged)
+
+
+def _worker_compute_mode_task(task: Tuple[int, float, float]) -> Tuple[int, complex, float, bool]:
+    row_index, w_cm1, phi_offset_deg = task
+    if _WORKER_KX_VALUES_CM1 is None:
+        raise RuntimeError("Worker kx values not initialized.")
+    system = _get_worker_system(phi_offset_deg)
+    kx_complex, residual, converged = _find_mode_for_frequency(system, w_cm1, _WORKER_KX_VALUES_CM1, _WORKER_FAST)
+    return row_index, kx_complex, residual, converged
+
+
 
 def _deserialize_stack(payload: Dict[str, object]) -> StackSpec:
     from .models import DopingSpec
@@ -354,3 +387,116 @@ def compute_isofreq_map(
                 progress((i + 1) / len(phi_values), f"Computing isofrequency Im(rpp): {i + 1}/{len(phi_values)} angles")
 
     return phi_values, kx_values, np.imag(rpp)
+
+
+def _run_parallel_modes(
+    w_values_cm1: np.ndarray,
+    kx_values_cm1: np.ndarray,
+    stack_spec: StackSpec,
+    workers: int,
+    progress: ProgressCallback,
+    custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
+    fast: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Parallel per-frequency complex-zero search, mirroring :func:`_run_parallel_rows`."""
+    n = len(w_values_cm1)
+    kx_mode = np.full(n, np.nan + 1j * np.nan, dtype=np.complex128)
+    residual = np.full(n, np.inf, dtype=float)
+    converged = np.zeros(n, dtype=bool)
+
+    payload = _stack_to_worker_payload(stack_spec, custom_materials=custom_materials)
+    kx_array = np.asarray(kx_values_cm1, dtype=float)
+
+    if progress:
+        progress(0.0, "Locating reflectivity zeros: scheduling workers")
+
+    tasks = [(i, float(w), 0.0) for i, w in enumerate(w_values_cm1)]
+    chunk = max(1, len(tasks) // (workers * 4))
+    pool = ProcessPoolExecutor(
+        max_workers=workers,
+        initializer=_worker_init,
+        initargs=(payload, kx_array, fast),
+    )
+    try:
+        done = 0
+        total = len(tasks)
+        for i, kx_c, res, ok in pool.map(_worker_compute_mode_task, tasks, chunksize=chunk):
+            kx_mode[i] = kx_c
+            residual[i] = res
+            converged[i] = ok
+            done += 1
+            if progress:
+                progress(done / total, f"Locating reflectivity zeros: {done}/{total} frequencies")
+    except (BrokenProcessPool, OSError):
+        pool.shutdown(wait=False, cancel_futures=True)
+        if progress:
+            progress(0.0, "Locating reflectivity zeros: parallel unavailable, falling back to serial")
+        system = _build_system(stack_spec, custom_materials=payload.get("custom_materials", {}))
+        total = len(tasks)
+        for done, (i, w, _phi) in enumerate(tasks, start=1):
+            kx_mode[i], residual[i], converged[i] = _find_mode_for_frequency(system, w, kx_array, fast)
+            if progress:
+                progress(done / total, f"Locating reflectivity zeros: {done}/{total} frequencies (serial fallback)")
+    except BaseException:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    else:
+        pool.shutdown(wait=True, cancel_futures=False)
+
+    return kx_mode, residual, converged
+
+
+def compute_mode_dispersion(
+    stack_spec: StackSpec,
+    w_min: float,
+    w_max: float,
+    nw: int,
+    kx_min: float,
+    kx_max: float,
+    nk: int,
+    workers: Optional[int] = None,
+    progress: ProgressCallback = None,
+    custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
+    fast: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Trace the optical mode (complex zero of rpp) as a function of frequency.
+
+    For each frequency the reduced wavevector ``zeta`` that solves ``rpp(zeta) = 0``
+    is found: the ``|rpp|`` minimum on the real ``kx`` grid seeds a complex-plane
+    Newton refinement. The returned ``kx_mode`` is complex (``zeta * w`` in cm⁻¹);
+    its real part is the mode wavevector and its imaginary part the modal loss.
+
+    Returns ``(w_values, kx_mode_cm1, residual, converged)``. ``residual`` is the
+    final ``|rpp|`` and ``converged`` flags the frequencies where the search reached
+    a genuine zero (callers should drop the rest).
+    """
+    stack = stack_spec.enforce_boundary_layers()
+    stack.validate()
+
+    w_values = np.linspace(w_min, w_max, int(nw), dtype=float)
+    kx_values = np.linspace(kx_min, kx_max, int(nk), dtype=float)
+
+    if workers is None:
+        workers = _default_workers()
+
+    if workers > 1:
+        kx_mode, residual, converged = _run_parallel_modes(
+            w_values,
+            kx_values,
+            stack,
+            workers=workers,
+            progress=progress,
+            custom_materials=custom_materials,
+            fast=fast,
+        )
+    else:
+        kx_mode = np.full(len(w_values), np.nan + 1j * np.nan, dtype=np.complex128)
+        residual = np.full(len(w_values), np.inf, dtype=float)
+        converged = np.zeros(len(w_values), dtype=bool)
+        system = _build_system(stack, custom_materials=custom_materials)
+        for i, w in enumerate(w_values):
+            kx_mode[i], residual[i], converged[i] = _find_mode_for_frequency(system, float(w), kx_values, fast)
+            if progress:
+                progress((i + 1) / len(w_values), f"Locating reflectivity zeros: {i + 1}/{len(w_values)} frequencies")
+
+    return w_values, kx_mode, residual, converged
