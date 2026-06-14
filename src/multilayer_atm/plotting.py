@@ -233,6 +233,7 @@ def plot_heatmap(
     cmap: str = "magma",
     vmin: float | None = None,
     vmax: float | None = None,
+    mode_overlay: dict[str, np.ndarray] | None = None,
 ) -> plt.Figure:
     """Render a static Matplotlib dispersion heatmap for export."""
     xx = np.asarray(x)
@@ -251,6 +252,21 @@ def plot_heatmap(
     )
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label("Im(rpp)")
+    if mode_overlay is not None and len(mode_overlay.get("x", [])) > 0:
+        ax.plot(
+            np.asarray(mode_overlay["x"], dtype=float),
+            np.asarray(mode_overlay["y"], dtype=float),
+            color="#39ff14",
+            linewidth=1.6,
+            marker="o",
+            markersize=3.0,
+            markeredgecolor="#0c1420",
+            markeredgewidth=0.4,
+            label="Mode (rpp=0)",
+        )
+        ax.set_xlim(float(xx.min()), float(xx.max()))
+        ax.set_ylim(float(yy.min()), float(yy.max()))
+        ax.legend(loc="best", fontsize=8, framealpha=0.7)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.set_title(title, fontsize=12, weight="bold")
@@ -270,6 +286,7 @@ def plot_heatmap_interactive(
     peak_overlay: dict[str, np.ndarray] | None = None,
     zmin: float | None = None,
     zmax: float | None = None,
+    mode_overlay: dict[str, np.ndarray] | None = None,
 ):
     """Render an interactive Plotly dispersion heatmap for the Streamlit UI."""
     import plotly.graph_objects as go
@@ -307,6 +324,28 @@ def plot_heatmap_interactive(
                 name="Peak dots",
                 hovertemplate="w=%{y:.3f}<br>kx=%{x:.3f}<br>row max Im(rpp)=%{customdata:.4g}<extra></extra>",
                 customdata=np.asarray(peak_overlay["value"], dtype=float),
+            )
+        )
+    if mode_overlay is not None and len(mode_overlay.get("x", [])) > 0:
+        fig.add_trace(
+            go.Scatter(
+                x=np.asarray(mode_overlay["x"], dtype=float),
+                y=np.asarray(mode_overlay["y"], dtype=float),
+                mode="lines+markers",
+                line=dict(color="#39ff14", width=2),
+                marker=dict(size=4, color="#39ff14", line=dict(color=chrome["marker_edge"], width=0.6)),
+                name="Mode (rpp=0)",
+                connectgaps=False,
+                customdata=np.column_stack(
+                    [
+                        np.asarray(mode_overlay.get("im", np.zeros_like(mode_overlay["x"])), dtype=float),
+                        np.asarray(mode_overlay.get("residual", np.zeros_like(mode_overlay["x"])), dtype=float),
+                    ]
+                ),
+                hovertemplate=(
+                    "w=%{y:.3f}<br>Re kx=%{x:.4f}<br>Im kx=%{customdata[0]:.4g}"
+                    "<br>|rpp|=%{customdata[1]:.2e}<extra></extra>"
+                ),
             )
         )
     fig.update_layout(

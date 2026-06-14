@@ -18,7 +18,7 @@ from ..plotting import (
     plot_polar_isofrequency,
     plot_polar_isofrequency_interactive,
 )
-from ..solver import compute_isofreq_map, compute_rpp_map
+from ..solver import compute_isofreq_map, compute_mode_dispersion, compute_rpp_map
 from .layer_builder import build_stack_from_session
 from .material_builder import custom_material_registry
 from ..models import StackSpec
@@ -60,6 +60,7 @@ CALC_UI_STATE_KEYS = (
     "plot_color_max",
     "show_peak_dots",
     "peak_dot_threshold_percent",
+    "show_mode_trace",
     "map_state",
     "iso_state",
 )
@@ -78,6 +79,7 @@ def _initial_calc_defaults(speed_presets: Mapping[str, Mapping[str, Mapping[str,
         "plot_color_max": 1.0,
         "show_peak_dots": True,
         "peak_dot_threshold_percent": 10.0,
+        "show_mode_trace": False,
         "plot_refresh_nonce": 0,
         "compute_state": "Idle",
         "last_compute_signature": None,
@@ -329,7 +331,12 @@ def _isofrequency_export_bytes(
     )
 
 
-def _dispersion_plot_png_bytes(im_rpp: np.ndarray, kxv_cm1: np.ndarray, wv_cm1: np.ndarray) -> bytes:
+def _dispersion_plot_png_bytes(
+    im_rpp: np.ndarray,
+    kxv_cm1: np.ndarray,
+    wv_cm1: np.ndarray,
+    mode_overlay: dict[str, np.ndarray] | None = None,
+) -> bytes:
     vmin, vmax = _active_plot_color_limits()
     fig = plot_heatmap(
         x=np.asarray(kx_cm1_to_ui(kxv_cm1), dtype=float),
@@ -341,6 +348,7 @@ def _dispersion_plot_png_bytes(im_rpp: np.ndarray, kxv_cm1: np.ndarray, wv_cm1: 
         cmap=str(PLOT_COLORMAPS[str(st.session_state.get("plot_colormap", "Magma"))]).lower(),
         vmin=vmin,
         vmax=vmax,
+        mode_overlay=mode_overlay,
     )
     return _figure_png_bytes(fig)
 
@@ -821,6 +829,102 @@ def _peak_overlay_for_iso(phi_rad: np.ndarray, kx_ui: np.ndarray, im_rpp: np.nda
     }
 
 
+def _map_mode_trace_data(
+    wv_cm1: np.ndarray, kxv_cm1: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Compute (and cache) the complex rpp-zero trace for the displayed map.
+
+    The trace is recomputed from the current session stack (with the map's phi0
+    pre-tilt) sampled on the displayed frequency/kx grid. Results are cached by the
+    displayed result id and stack hash so toggling the overlay does not recompute.
+    """
+    result_id = _displayed_result_id("Im(rpp) as f(w, kx)")
+    if result_id is None:
+        return None
+    wv = np.asarray(wv_cm1, dtype=float)
+    kxv = np.asarray(kxv_cm1, dtype=float)
+    if wv.size < 1 or kxv.size < 2:
+        return None
+
+    stack = build_stack_from_session()
+    phi0 = float(_mode_state("map").get("phi0", 0.0))
+    fast = bool(st.session_state.get("fast_solver", True))
+    workers = int(st.session_state.get("worker_count", 4))
+
+    cache: Dict[tuple, tuple] = st.session_state.setdefault("_mode_trace_cache", {})
+    key = (str(result_id), hash(stack), phi0, fast, int(wv.size), int(kxv.size))
+    cached = cache.get(key)
+    if cached is None:
+        stack_for_run = stack.with_interior_alpha_offset(phi0)
+        with st.spinner("Locating reflectivity zeros (rpp=0)..."):
+            _w, kx_mode, residual, converged = compute_mode_dispersion(
+                stack_for_run,
+                w_min=float(wv[0]),
+                w_max=float(wv[-1]),
+                nw=int(wv.size),
+                kx_min=float(kxv[0]),
+                kx_max=float(kxv[-1]),
+                nk=int(kxv.size),
+                workers=workers,
+                custom_materials=custom_material_registry(),
+                fast=fast,
+            )
+        cached = (
+            np.asarray(kx_mode, dtype=np.complex128),
+            np.asarray(residual, dtype=float),
+            np.asarray(converged, dtype=bool),
+        )
+        cache[key] = cached
+        max_entries = 8
+        if len(cache) > max_entries:
+            for stale_key in list(cache.keys())[:-max_entries]:
+                cache.pop(stale_key, None)
+    return cached
+
+
+def _map_mode_trace_overlay(wv_cm1: np.ndarray, kxv_cm1: np.ndarray) -> dict[str, np.ndarray] | None:
+    """Build the heatmap overlay dict for the rpp-zero mode trace (UI kx units)."""
+    if not bool(st.session_state.get("show_mode_trace", False)):
+        return None
+    data = _map_mode_trace_data(wv_cm1, kxv_cm1)
+    if data is None:
+        return None
+    kx_mode, residual, converged = data
+    wv = np.asarray(wv_cm1, dtype=float)
+    re_ui = np.asarray(kx_cm1_to_ui(np.real(kx_mode)), dtype=float)
+    im_ui = np.asarray(kx_cm1_to_ui(np.imag(kx_mode)), dtype=float)
+    valid = np.asarray(converged, dtype=bool) & np.isfinite(re_ui)
+    if not np.any(valid):
+        return None
+    # Break the connecting line at frequencies with no genuine zero.
+    x = np.where(valid, re_ui, np.nan)
+    return {"x": x, "y": wv, "im": im_ui, "residual": np.asarray(residual, dtype=float)}
+
+
+def _mode_trace_export_bytes(wv_cm1: np.ndarray, kxv_cm1: np.ndarray) -> bytes | None:
+    """Serialize the rpp-zero trace (w, complex kx, residual) to CSV bytes."""
+    data = _map_mode_trace_data(wv_cm1, kxv_cm1)
+    if data is None:
+        return None
+    kx_mode, residual, converged = data
+    wv = np.asarray(wv_cm1, dtype=float)
+    table = np.column_stack(
+        [
+            wv,
+            np.real(kx_mode),
+            np.imag(kx_mode),
+            np.asarray(residual, dtype=float),
+            np.asarray(converged, dtype=bool).astype(float),
+        ]
+    )
+    buffer = StringIO()
+    buffer.write("# mode trace: complex kx where rpp=0, as f(w)\n")
+    buffer.write("# units: w=cm^-1, kx=cm^-1 (Re=mode wavevector, Im=loss)\n")
+    buffer.write("w,re_kx,im_kx,abs_rpp,converged\n")
+    np.savetxt(buffer, table, delimiter=",", fmt="%.12g")
+    return buffer.getvalue().encode("utf-8")
+
+
 def _render_map_input_strip(speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]]) -> None:
     map_state = _mode_state("map")
     map_custom = str(st.session_state.get("map_resolution_choice", "Normal")) == "Custom"
@@ -1076,6 +1180,37 @@ def _render_plot_toolbar(
             if _manual_color_limits_invalid():
                 st.caption(":red[Manual colorscale requires Max > Min. Plot display falls back to auto until fixed.]")
 
+        is_map_mode = str(st.session_state.get("calc_mode", "Im(rpp) as f(w, kx)")) == "Im(rpp) as f(w, kx)"
+        map_has_result = is_map_mode and st.session_state.get("map_result") is not None
+        mode_row = st.columns([0.30, 0.70], gap=None, vertical_alignment="bottom")
+        with mode_row[0]:
+            st.toggle(
+                "Mode trace (rpp=0)",
+                key="show_mode_trace",
+                disabled=not map_has_result,
+                help=(
+                    "Overlay the optical mode on the dispersion map: for each frequency, "
+                    "find the complex in-plane wavevector where the p-polarized reflection "
+                    "coefficient rpp vanishes (a true reflectivity zero). The real part is "
+                    "drawn as a connected line; hover shows the imaginary part (modal loss) "
+                    "and the residual |rpp|. Only available for the Im(rpp) map."
+                ),
+            )
+        with mode_row[1]:
+            if map_has_result and bool(st.session_state.get("show_mode_trace", False)):
+                wv, kxv, _im = st.session_state.map_result
+                trace_bytes = _mode_trace_export_bytes(wv, kxv)
+                if trace_bytes is not None:
+                    st.download_button(
+                        ":material/download: Export mode trace",
+                        data=trace_bytes,
+                        file_name=f"{_stack_plot_filename_stem('mode-trace-rpp-zero')}.csv",
+                        mime="text/csv",
+                        width="stretch",
+                    )
+                else:
+                    st.caption(":material/info: No reflectivity zero found on the current grid.")
+
         action_row = st.columns([0.22, 0.26, 0.26, 0.26], gap=None, vertical_alignment="center")
         with action_row[0]:
             st.caption(":material/settings: Actions")
@@ -1153,9 +1288,14 @@ def _current_plot_image_payload() -> tuple[bytes | None, str | None]:
     vmin, vmax = _active_plot_color_limits()
     if mode == "Im(rpp) as f(w, kx)" and st.session_state.map_result is not None:
         wv, kxv, im_rpp = st.session_state.map_result
-        key = ("png-map", result_id, colormap, vmin, vmax)
+        mode_overlay = _map_mode_trace_overlay(wv, kxv)
+        overlay_key = None if mode_overlay is None else hash(np.asarray(mode_overlay["x"], dtype=float).tobytes())
+        key = ("png-map", result_id, colormap, vmin, vmax, overlay_key)
         return (
-            _cached_bytes(key, lambda: _dispersion_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv)),
+            _cached_bytes(
+                key,
+                lambda: _dispersion_plot_png_bytes(im_rpp=im_rpp, kxv_cm1=kxv, wv_cm1=wv, mode_overlay=mode_overlay),
+            ),
             f"{_stack_plot_filename_stem('im-rpp-map')}.png",
         )
     if mode == "Isofrequency surface" and st.session_state.iso_result is not None:
@@ -1178,6 +1318,7 @@ def _render_map_plot(resolution_name: str, workers: int) -> None:
     full_w = np.asarray(wv, dtype=float)
     full_z = np.asarray(im_rpp, dtype=float)
     peak_overlay = _peak_overlay_for_map(full_kx_ui, full_w, full_z)
+    mode_overlay = _map_mode_trace_overlay(wv, kxv)
     fast_preview = bool(st.session_state.get("fast_preview_plots", True))
     preview_caption: str | None = None
     if fast_preview:
@@ -1206,6 +1347,7 @@ def _render_map_plot(resolution_name: str, workers: int) -> None:
         peak_overlay=peak_overlay,
         zmin=vmin,
         zmax=vmax,
+        mode_overlay=mode_overlay,
     )
     st.plotly_chart(
         fig,

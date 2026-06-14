@@ -32,9 +32,13 @@ Three-layer design:
 Frozen dataclasses: `DopingSpec` → `LayerSpec` → `StackSpec`. These are the single source of truth for optical configurations. All computation and UI work flows through these structures.
 
 ### 2. Computation (`src/multilayer_atm/solver.py`, `engine.py`, `solver_fast.py`)
-`solver.py` exposes two public entry points and orchestrates parallelism:
+`solver.py` exposes three public entry points and orchestrates parallelism:
 - `compute_rpp_map()` — dispersion map: Im(rpp) as f(ω, kx)
 - `compute_isofreq_map()` — isofrequency diagram: Im(rpp) as f(φ, kx) at fixed ω
+- `compute_mode_dispersion()` — mode trace: the complex in-plane wavevector kx where
+  rpp = 0, as f(ω). Per frequency it seeds from the |rpp| minimum on the real kx grid
+  and refines into the complex plane via `solver_fast.find_rpp_zero` (damped Newton).
+  The UI overlays Re(kx) on the dispersion map ("Mode trace (rpp=0)" toggle).
 
 Uses `ProcessPoolExecutor` (up to 4 workers) with serial fallback. Converts the
 Passler z-x-z Euler angles to the (theta, phi, psi) ordering the engine expects

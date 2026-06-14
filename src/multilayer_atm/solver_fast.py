@@ -462,3 +462,77 @@ def compute_row_pointwise(system: engine.System, w_cm1: float, kx_cm1: np.ndarra
         except (FastPathUnavailable, np.linalg.LinAlgError, FloatingPointError, ValueError):
             out[j] = 0.0 + 0.0j
     return out
+
+
+def _rpp_raw_from_zeta(system: engine.System, f_hz: float, z: np.ndarray) -> np.ndarray:
+    """Complex rpp over a zeta array WITHOUT masking non-finite samples.
+
+    :func:`_rpp_from_zeta` maps non-finite samples to zero, which would conflate a
+    genuine reflection zero (numerator -> 0) with a pole (denominator -> 0). The
+    mode finder needs the unmasked ratio so Newton iterations converge onto true
+    zeros of rpp and are repelled by poles (where |rpp| is large, not small).
+    """
+    gs = _batched_gamma_star(system, f_hz, z)
+    denom = gs[:, 0, 0] * gs[:, 2, 2] - gs[:, 0, 2] * gs[:, 2, 0]
+    numer = gs[:, 1, 0] * gs[:, 2, 2] - gs[:, 1, 2] * gs[:, 2, 0]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return numer / denom
+
+
+def find_rpp_zero(
+    system: engine.System,
+    f_hz: float,
+    zeta0: complex,
+    *,
+    max_iter: int = 60,
+    tol: float = 1e-9,
+    step_eps: float = 1e-6,
+) -> tuple[complex, float, bool]:
+    """Locate the complex reduced wavevector ``zeta`` where ``rpp(zeta) = 0``.
+
+    ``system`` must already be initialised at ``f_hz`` (e.g. via a prior row
+    evaluation). Starting from ``zeta0`` -- typically the ``|rpp|`` minimum on the
+    real kx grid -- a damped Newton iteration refines the root into the complex
+    plane to sub-grid precision. The derivative is a central finite difference
+    (rpp is analytic in zeta). The damping rejects any trial step that does not
+    reduce ``|rpp|`` (or lands on a non-finite sample), which keeps the search from
+    running off toward a pole.
+
+    Returns ``(zeta, residual, converged)`` where ``residual`` is ``|rpp(zeta)|``
+    and ``converged`` is ``True`` only when the residual reached ``tol``. A failed
+    or diverging search returns ``converged=False`` so the caller can drop the
+    point rather than draw a spurious mode.
+    """
+
+    def rpp_at(zeta: complex) -> complex:
+        try:
+            value = _rpp_raw_from_zeta(system, f_hz, np.array([zeta], dtype=np.complex128))[0]
+        except (FastPathUnavailable, np.linalg.LinAlgError, FloatingPointError, ValueError):
+            return complex(np.nan, np.nan)
+        return complex(value)
+
+    z = complex(zeta0)
+    fz = rpp_at(z)
+    if not np.isfinite(fz):
+        return z, float("inf"), False
+
+    for _ in range(int(max_iter)):
+        if abs(fz) < tol:
+            return z, float(abs(fz)), True
+        h = step_eps * max(abs(z), 1.0)
+        df = (rpp_at(z + h) - rpp_at(z - h)) / (2.0 * h)
+        if df == 0 or not np.isfinite(df):
+            break
+        step = fz / df
+        damp = 1.0
+        z_new = z - step
+        fz_new = rpp_at(z_new)
+        while (not np.isfinite(fz_new) or abs(fz_new) > abs(fz)) and damp > 1e-4:
+            damp *= 0.5
+            z_new = z - damp * step
+            fz_new = rpp_at(z_new)
+        if not np.isfinite(fz_new) or abs(fz_new) >= abs(fz):
+            break
+        z, fz = z_new, fz_new
+
+    return z, float(abs(fz)), bool(abs(fz) < tol)
