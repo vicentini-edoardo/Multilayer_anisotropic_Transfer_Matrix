@@ -1,39 +1,36 @@
-"""Vectorised ("fast") evaluation of Im(rpp) rows.
+"""In-house transfer-matrix engine for Im(rpp) rows.
 
-This module reimplements the pyGTM per-layer transfer-matrix algorithm in a form
-that is batched over the in-plane momentum axis (all kx samples of a single
-frequency/angle row are processed in one set of NumPy operations) instead of the
-per-point Python loop used by :func:`multilayer_atm.solver._compute_row_with_system`.
+This module is the numerical core of the solver. It implements the generalized
+4x4 transfer-matrix algorithm (Passler & Paarmann 2017) directly in NumPy,
+batched over the in-plane momentum axis: all kx samples of a single
+frequency/angle row are processed in one set of array operations. It depends only
+on the lightweight :mod:`multilayer_atm.engine` containers (no pyGTM at runtime);
+pyGTM is retained solely as an independent validation reference for the tests.
 
-The maths follows Passler & Paarmann (2017) exactly as transcribed in
-``GTM.GTMcore`` (``calculate_matrices`` / ``calculate_q`` / ``calculate_gamma`` /
-``calculate_transfer_matrix``). The batched results match the per-point reference
-to round-off for the supported cases. Two assumptions make a row eligible for the
-fast path:
-
+:func:`compute_row_batched` evaluates a whole row at once. It assumes
 * the four out-of-plane modes split cleanly into two forward and two backward
   modes (the physical case for passive media), and
-* every batched 4x4 boundary matrix is invertible.
+* every 4x4 boundary matrix is invertible.
 
-If either assumption fails for a row, :class:`FastPathUnavailable` is raised so the
-caller can transparently fall back to the exact per-point evaluation for that row.
-The numerical result is therefore identical to the reference within floating-point
-tolerance; the speed-up comes purely from amortising LAPACK/Python overhead.
+If a row violates the first assumption :class:`FastPathUnavailable` is raised so
+the caller can fall back to :func:`compute_row_pointwise`, which evaluates each
+sample independently and maps the rare ill-conditioned point to zero. The two
+paths agree to floating-point round-off; the batched path is simply faster by
+amortising LAPACK/Python overhead.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-import GTM.GTMcore as GTM  # type: ignore
-
+from . import engine
 from .materials import CM1_TO_HZ
 
-# Constants and thresholds mirrored from GTM.GTMcore so the batched path makes the
-# same branch decisions as the per-point reference.
-_C_CONST = GTM.c_const
-_QSD_THR = GTM.qsd_thr
-_ZERO_THR = GTM.zero_thr
+# Constants and thresholds from the engine so the batched path makes the same
+# branch decisions as the (now also engine-based) per-point path.
+_C_CONST = engine.C_CONST
+_QSD_THR = engine.QSD_THR
+_ZERO_THR = engine.ZERO_THR
 _ZETA_IMAG_REG = 1e-14
 
 _DELTA1234 = np.array(
@@ -49,9 +46,9 @@ class FastPathUnavailable(RuntimeError):
 def _batched_exact_inv(matrices: np.ndarray) -> np.ndarray:
     """Analytic inverse of a stack of 4x4 matrices, ``matrices`` shape (N, 4, 4).
 
-    Vectorised transcription of :func:`GTM.GTMcore.exact_inv`. Singular matrices
-    yield non-finite entries (rather than a pseudo-inverse); the caller treats the
-    resulting non-finite rpp as zero, matching the reference guard.
+    Analytic 4x4 cofactor inverse, batched. Singular matrices yield non-finite
+    entries (rather than a pseudo-inverse); the caller treats the resulting
+    non-finite rpp as zero.
     """
     a = np.swapaxes(matrices, -1, -2)
 
@@ -107,7 +104,7 @@ def _batched_delta(epsilon: np.ndarray, mu: complex, z: np.ndarray) -> np.ndarra
     M33 = M44 = mu
 
     # a-matrix (eqn 9). Entries that are identically zero for non-bianisotropic
-    # media are omitted; the rest follow GTM.calculate_matrices with M[2,5]=M[5,2]=0.
+    # media are omitted; the constitutive matrix has M[2,5]=M[5,2]=0.
     a20 = (-M20 * M55) / b
     a21 = (-M21 * M55) / b
     a24 = (-(z) * M55) / b
@@ -160,7 +157,7 @@ def _clean_small(values: np.ndarray) -> np.ndarray:
     return out
 
 
-def _batched_qs_gamma(layer: GTM.Layer, z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _batched_qs_gamma(layer: engine.Layer, z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Return sorted out-of-plane wavevectors qs (N, 4) and field matrix gamma (N, 4, 3)."""
     epsilon = layer.epsilon
     mu = layer.mu
@@ -330,7 +327,7 @@ def _batched_gamma(
     return np.where(biref[:, None, None], gamma_b, gamma_xu)
 
 
-def _batched_ai(layer: GTM.Layer, z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _batched_ai(layer: engine.Layer, z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     qs, gamma = _batched_qs_gamma(layer, z)
     mu = layer.mu
     n = z.shape[0]
@@ -342,7 +339,7 @@ def _batched_ai(layer: GTM.Layer, z: np.ndarray) -> tuple[np.ndarray, np.ndarray
     return ai, qs
 
 
-def _batched_ti(layer: GTM.Layer, f_hz: float, z: np.ndarray) -> np.ndarray:
+def _batched_ti(layer: engine.Layer, f_hz: float, z: np.ndarray) -> np.ndarray:
     ai, qs = _batched_ai(layer, z)
     phase = (-2.0j * np.pi * f_hz / _C_CONST) * (qs * layer.thick)
     n = z.shape[0]
@@ -353,7 +350,7 @@ def _batched_ti(layer: GTM.Layer, f_hz: float, z: np.ndarray) -> np.ndarray:
     return ai @ (ki @ ai_inv)
 
 
-def _batched_gamma_star(system: GTM.System, f_hz: float, z: np.ndarray) -> np.ndarray:
+def _batched_gamma_star(system: engine.System, f_hz: float, z: np.ndarray) -> np.ndarray:
     ai_super, _ = _batched_ai(system.superstrate, z)
     ai_inv_super = _batched_exact_inv(ai_super)
     ai_sub, _ = _batched_ai(system.substrate, z)
@@ -368,27 +365,54 @@ def _batched_gamma_star(system: GTM.System, f_hz: float, z: np.ndarray) -> np.nd
     return gamma_star
 
 
-def compute_row_batched(system: GTM.System, w_cm1: float, kx_cm1: np.ndarray) -> np.ndarray:
-    """Vectorised counterpart of ``solver._compute_row_with_system``.
-
-    Returns the complex rpp row. Raises :class:`FastPathUnavailable` if the row is
-    not eligible for the vectorised path (caller should fall back to per-point).
-    """
-    f_hz = float(np.asarray(w_cm1, dtype=float) * CM1_TO_HZ)
-    system.initialize_sys(f_hz)
-
+def _zeta_from_kx(w_cm1: float, kx_cm1: np.ndarray) -> np.ndarray:
+    """Reduced wavevector zeta for a row, lifted off the singular real axis."""
     kx = np.asarray(kx_cm1, dtype=float)
-    zeta_real = kx * (1.0 / float(w_cm1))
-    # Input momentum is purely real here, so lift every sample off the singular
-    # branch with the same tiny imaginary regulariser used by the per-point path.
-    z = zeta_real.astype(np.complex128)
-    z = z + 1j * _ZETA_IMAG_REG
+    z = (kx * (1.0 / float(w_cm1))).astype(np.complex128)
+    # Input momentum is purely real here, so add the same tiny imaginary
+    # regulariser the original per-point evaluation used to avoid the mode-sorting
+    # singular branch.
+    return z + 1j * _ZETA_IMAG_REG
 
+
+def _rpp_from_zeta(system: engine.System, f_hz: float, z: np.ndarray) -> np.ndarray:
+    """Im(rpp) inputs: rpp values over a zeta array (epsilon must be initialised)."""
     gs = _batched_gamma_star(system, f_hz, z)
-
     denom = gs[:, 0, 0] * gs[:, 2, 2] - gs[:, 0, 2] * gs[:, 2, 0]
     numer = gs[:, 1, 0] * gs[:, 2, 2] - gs[:, 1, 2] * gs[:, 2, 0]
     with np.errstate(divide="ignore", invalid="ignore"):
         out = numer / denom
-    out = np.where(np.isfinite(out), out, 0.0 + 0.0j)
+    return np.where(np.isfinite(out), out, 0.0 + 0.0j)
+
+
+def compute_row_batched(system: engine.System, w_cm1: float, kx_cm1: np.ndarray) -> np.ndarray:
+    """Vectorised evaluation of a whole rpp row (all kx at once).
+
+    Returns the complex rpp row. Raises :class:`FastPathUnavailable` if the row is
+    not eligible for the vectorised path (the caller should fall back to the
+    per-point path, which evaluates each sample independently).
+    """
+    f_hz = float(np.asarray(w_cm1, dtype=float) * CM1_TO_HZ)
+    system.initialize_sys(f_hz)
+    z = _zeta_from_kx(w_cm1, kx_cm1)
+    return _rpp_from_zeta(system, f_hz, z)
+
+
+def compute_row_pointwise(system: engine.System, w_cm1: float, kx_cm1: np.ndarray) -> np.ndarray:
+    """Per-point evaluation of a rpp row.
+
+    Uses the same engine as :func:`compute_row_batched` but evaluates each kx
+    sample on its own, so a single ill-conditioned point (one the batched path
+    rejects for the whole row) is mapped to zero without affecting its neighbours.
+    Numerically identical to the batched path everywhere the batched path succeeds.
+    """
+    f_hz = float(np.asarray(w_cm1, dtype=float) * CM1_TO_HZ)
+    system.initialize_sys(f_hz)
+    z = _zeta_from_kx(w_cm1, kx_cm1)
+    out = np.empty(z.shape[0], dtype=np.complex128)
+    for j in range(z.shape[0]):
+        try:
+            out[j] = _rpp_from_zeta(system, f_hz, z[j : j + 1])[0]
+        except (FastPathUnavailable, np.linalg.LinAlgError, FloatingPointError, ValueError):
+            out[j] = 0.0 + 0.0j
     return out

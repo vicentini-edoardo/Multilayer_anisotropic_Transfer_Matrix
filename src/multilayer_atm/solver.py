@@ -9,26 +9,9 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
-from . import solver_fast
+from . import engine, solver_fast
 from .materials import CM1_TO_HZ, axes_for_material
 from .models import LayerSpec, StackSpec
-
-try:
-    import GTM.GTMcore as GTM  # type: ignore
-except Exception as exc:  # pragma: no cover - exercised by runtime environment setup
-    raise ImportError(
-        "pyGTM is required but not importable. Install a compatible pyGTM package "
-        "(for example via `pip install \"pyGTM @ git+https://github.com/pyMatJ/pyGTM.git@7a228b7314ea66ae025ff346c0d0e8bfb86cc82c\"`) and retry."
-    ) from exc
-
-# pyGTM emits a bare ``print('replaced gamma by Berreman')`` from inside
-# ``calculate_gamma`` every time a birefringent layer is detected. On a dispersion
-# map this fires once per (w, kx) sample, flooding stdout and adding measurable
-# overhead in the innermost loop. Birefringence handling is expected behaviour, not
-# an error, so silence the diagnostic by shadowing ``print`` in the module's global
-# namespace (module-level functions resolve ``print`` via their module dict before
-# falling back to builtins). This affects only pyGTM's own print calls.
-GTM.print = lambda *args, **kwargs: None  # type: ignore[attr-defined]
 
 
 ProgressCallback = Optional[Callable[[float, str], None]]
@@ -40,18 +23,9 @@ ProgressCallback = Optional[Callable[[float, str], None]]
 # the user instead of producing a misleading all-zero map.
 _NUMERICAL_ERRORS = (np.linalg.LinAlgError, FloatingPointError, ZeroDivisionError, ValueError)
 
-# Small imaginary part used to lift zeta off the real axis when the in-plane
-# momentum is purely real, which avoids pyGTM mode-sorting singular branches.
-_ZETA_IMAG_REG = 1e-14
-
-DELTA1234 = np.array(
-    [[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]],
-    dtype=np.complex128,
-)
-
 _WORKER_STACK_PAYLOAD: Optional[Dict[str, object]] = None
 _WORKER_KX_VALUES_CM1: Optional[np.ndarray] = None
-_WORKER_SYSTEM_CACHE: Dict[float, GTM.System] = {}
+_WORKER_SYSTEM_CACHE: Dict[float, engine.System] = {}
 _WORKER_FAST: bool = False
 
 
@@ -94,9 +68,9 @@ def _default_workers() -> int:
     return max(1, min(4, cpu))
 
 
-def _build_system(stack_spec: StackSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> GTM.System:
+def _build_system(stack_spec: StackSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> engine.System:
     stack = stack_spec.enforce_boundary_layers()
-    system = GTM.System()
+    system = engine.System()
 
     layers = list(stack.layers)
     super_layer = _build_layer(layers[0], custom_materials=custom_materials)
@@ -110,10 +84,10 @@ def _build_system(stack_spec: StackSpec, custom_materials: Mapping[str, Mapping[
     return system
 
 
-def _build_layer(layer_spec: LayerSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> GTM.Layer:
+def _build_layer(layer_spec: LayerSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> engine.Layer:
     axes = axes_for_material(layer_spec.material, layer_spec.doping, custom_materials=custom_materials)
     theta, phi, psi = passler_to_pygtm_euler(layer_spec.euler_deg)
-    return GTM.Layer(
+    return engine.Layer(
         thickness=float(layer_spec.thickness_m),
         epsilon1=axes.fx,
         epsilon2=axes.fy,
@@ -124,109 +98,21 @@ def _build_layer(layer_spec: LayerSpec, custom_materials: Mapping[str, Mapping[s
     )
 
 
-def _layer_ai(layer: GTM.Layer, zeta: complex) -> np.ndarray:
-    """Build the boundary matrix Ai for a layer at the given zeta.
+def _compute_row(system: engine.System, w_cm1: float, kx_cm1: np.ndarray, fast: bool) -> np.ndarray:
+    """Compute one Im(rpp) row with the in-house transfer-matrix engine.
 
-    Mirrors the Ai construction in :py:meth:`GTM.Layer.calculate_transfer_matrix`
-    but skips the propagation matrix, the matrix products and the matrix inversion,
-    which are only needed when the full layer transfer matrix Ti is required.
-    Epsilon must already be set on the layer (via ``System.initialize_sys``).
-    """
-    # pyGTM carries per-layer state across calls in a way that makes a single
-    # sample's result depend on previously evaluated samples: ``_useBerreman`` is
-    # latched on for birefringent points but never reset, and ``calculate_gamma``
-    # aliases ``layer.gamma`` to ``layer.Berreman`` so a later call corrupts both.
-    # Reset the flag and hand each evaluation a fresh ``gamma`` array so every
-    # sample is computed independently (and reproducibly, regardless of grid
-    # iteration order or parallel chunking).
-    layer._useBerreman = False
-    layer.gamma = np.zeros((4, 3), dtype=np.complex128)
-    layer.calculate_matrices(zeta)
-    layer.calculate_q()
-    layer.calculate_gamma(zeta)
-    gamma = layer.gamma
-    qs = layer.qs
-    inv_mu = 1.0 / layer.mu
-    ai = np.empty((4, 4), dtype=np.complex128)
-    ai[0, :] = gamma[:, 0]
-    ai[1, :] = gamma[:, 1]
-    ai[2, :] = (qs * gamma[:, 0] - zeta * gamma[:, 2]) * inv_mu
-    ai[3, :] = qs * gamma[:, 1] * inv_mu
-    return ai
-
-
-def _layer_ti(layer: GTM.Layer, f_hz: float, zeta: complex) -> np.ndarray:
-    """Full layer transfer matrix Ti = Ai @ Ki @ Ai^{-1} with a single inversion."""
-    ai = _layer_ai(layer, zeta)
-    phase = (-2.0j * np.pi * f_hz / GTM.c_const) * (layer.qs * layer.thick)
-    ki = np.diag(np.exp(phase))
-    ai_inv = GTM.exact_inv(ai)
-    return ai @ (ki @ ai_inv)
-
-
-def _calculate_gamma_star_no_eps(system: GTM.System, f_hz: float, zeta: complex) -> np.ndarray:
-    # Boundary half-spaces only contribute their Ai: the superstrate via its inverse
-    # and the substrate directly. Computing their (discarded) transfer matrices and a
-    # second inversion per sample was redundant, so only the required pieces are built.
-    ai_inv_super = GTM.exact_inv(_layer_ai(system.superstrate, zeta))
-    ai_sub = _layer_ai(system.substrate, zeta)
-
-    tloc = np.identity(4, dtype=np.complex128)
-    for ii in range(len(system.layers) - 1, -1, -1):
-        tloc = _layer_ti(system.layers[ii], f_hz, zeta) @ tloc
-
-    gamma = ai_inv_super @ (tloc @ ai_sub)
-    gamma_star = DELTA1234 @ (gamma @ DELTA1234)
-    return gamma_star
-
-
-def _rpp_from_gamma_star(gamma_star: np.ndarray) -> complex:
-    denom = gamma_star[0, 0] * gamma_star[2, 2] - gamma_star[0, 2] * gamma_star[2, 0]
-    if denom == 0 or not np.isfinite(denom):
-        return 0.0 + 0.0j
-    rpp = gamma_star[1, 0] * gamma_star[2, 2] - gamma_star[1, 2] * gamma_star[2, 0]
-    out = rpp / denom
-    if not np.isfinite(out):
-        return 0.0 + 0.0j
-    return out
-
-
-def _compute_row_with_system(system: GTM.System, w_cm1: float, kx_cm1: np.ndarray) -> np.ndarray:
-    f_hz = float(cm1_to_hz(w_cm1))
-    system.initialize_sys(f_hz)
-    row = np.empty(kx_cm1.shape[0], dtype=np.complex128)
-    zeta = np.asarray(kx_cm1, dtype=float) * (1.0 / float(w_cm1))
-    for j, z in enumerate(zeta):
-        # Preserve a genuine imaginary momentum (evanescent input) when present;
-        # otherwise lift the purely real value off the singular branch.
-        z_imag = float(np.imag(z))
-        z_reg = complex(float(np.real(z)), z_imag if z_imag != 0.0 else _ZETA_IMAG_REG)
-        try:
-            gamma_star = _calculate_gamma_star_no_eps(system, f_hz, z_reg)
-        except _NUMERICAL_ERRORS:
-            try:
-                gamma_star = system.calculate_GammaStar(f_hz, z_reg)
-            except _NUMERICAL_ERRORS:
-                row[j] = 0.0 + 0.0j
-                continue
-        row[j] = _rpp_from_gamma_star(gamma_star)
-    return row
-
-
-def _compute_row(system: GTM.System, w_cm1: float, kx_cm1: np.ndarray, fast: bool) -> np.ndarray:
-    """Compute one Im(rpp) row, using the vectorised path when ``fast`` is set.
-
-    The vectorised path is numerically identical to the per-point path (it matches
-    to floating-point round-off); it just amortises LAPACK/Python overhead across
-    the kx axis. Rows the fast path cannot handle transparently fall back to the
-    exact per-point evaluation, so enabling ``fast`` never changes the result.
+    ``fast`` selects the vectorised whole-row evaluation; otherwise each kx sample
+    is evaluated independently. Both use the same engine and agree to floating-point
+    round-off. When the vectorised path rejects a row (an ill-conditioned sample
+    that breaks the batched mode sort) it transparently falls back to the per-point
+    path, so enabling ``fast`` never changes the result.
     """
     if not fast:
-        return _compute_row_with_system(system, w_cm1, kx_cm1)
+        return solver_fast.compute_row_pointwise(system, w_cm1, kx_cm1)
     try:
         return solver_fast.compute_row_batched(system, w_cm1, kx_cm1)
     except (solver_fast.FastPathUnavailable, *_NUMERICAL_ERRORS):
-        return _compute_row_with_system(system, w_cm1, kx_cm1)
+        return solver_fast.compute_row_pointwise(system, w_cm1, kx_cm1)
 
 
 def _stack_to_worker_payload(stack_spec: StackSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> Dict[str, object]:
@@ -256,7 +142,7 @@ def _worker_init(stack_payload: Dict[str, object], kx_values_cm1: np.ndarray, fa
     _WORKER_FAST = bool(fast)
 
 
-def _get_worker_system(phi_offset_deg: float) -> GTM.System:
+def _get_worker_system(phi_offset_deg: float) -> engine.System:
     if _WORKER_STACK_PAYLOAD is None:
         raise RuntimeError("Worker stack payload not initialized.")
 
@@ -342,7 +228,7 @@ def _run_parallel_rows(
         pool.shutdown(wait=False, cancel_futures=True)
         if progress:
             progress(0.0, f"{progress_label}: parallel unavailable, falling back to serial")
-        system_cache: Dict[float, GTM.System] = {}
+        system_cache: Dict[float, engine.System] = {}
         total = len(tasks)
         for done, (i, w, phi_off) in enumerate(tasks, start=1):
             system = system_cache.get(phi_off)

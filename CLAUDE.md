@@ -31,26 +31,31 @@ Three-layer design:
 ### 1. Models (`src/multilayer_atm/models.py`)
 Frozen dataclasses: `DopingSpec` → `LayerSpec` → `StackSpec`. These are the single source of truth for optical configurations. All computation and UI work flows through these structures.
 
-### 2. Computation (`src/multilayer_atm/solver.py`)
-Two public entry points:
+### 2. Computation (`src/multilayer_atm/solver.py`, `engine.py`, `solver_fast.py`)
+`solver.py` exposes two public entry points and orchestrates parallelism:
 - `compute_rpp_map()` — dispersion map: Im(rpp) as f(ω, kx)
 - `compute_isofreq_map()` — isofrequency diagram: Im(rpp) as f(φ, kx) at fixed ω
 
-Uses `ProcessPoolExecutor` (up to 4 workers) with serial fallback. Converts between Passler z-x-z Euler conventions and pyGTM conventions internally.
+Uses `ProcessPoolExecutor` (up to 4 workers) with serial fallback. Converts the
+Passler z-x-z Euler angles to the (theta, phi, psi) ordering the engine expects
+(`passler_to_pygtm_euler`, an angle relabelling only).
 
-Both entry points accept `fast=True` to use the vectorised solver in
-`solver_fast.py`, which evaluates an entire frequency/angle row across the kx axis
-in batched NumPy (one `np.linalg.eig` over all kx, batched 4×4 inverses/matmuls)
-instead of the per-point Python loop. It is numerically identical to the per-point
-path (matches to round-off) and ~10-20× faster on dense grids; rows it cannot
-handle fall back to the exact per-point evaluation. The GUI exposes this as the
-"Fast vectorised solver" toggle (default on).
+The numerical engine is **in-house and does not import pyGTM at runtime**:
+- `engine.py` — lightweight `Layer`/`System` data containers, the Euler rotation
+  matrix and the rotated permittivity tensor, plus shared constants/thresholds.
+- `solver_fast.py` — the 4×4 transfer-matrix algorithm (Passler & Paarmann 2017)
+  in batched NumPy. `compute_row_batched()` evaluates a whole ω/φ row across the
+  kx axis at once (one `np.linalg.eig` over all kx, batched 4×4 inverses/matmuls);
+  `compute_row_pointwise()` evaluates each kx sample independently.
 
-Note: pyGTM's `Layer` carries history-dependent state (a never-reset
-`_useBerreman` latch and a `gamma`/`Berreman` array alias). `_layer_ai` resets the
-flag and hands each evaluation a fresh `gamma` array so results are independent of
-grid iteration order and parallel chunking; the batched path reproduces the same
-clean per-point result.
+`fast=True` (default in the GUI, "Fast vectorised solver" toggle) uses the batched
+path; `fast=False` uses the per-point path. They agree to round-off, and the
+batched path falls back to per-point for any row it can't handle (modes that don't
+split 2 forward / 2 backward). The batched path is ~10-20× faster on dense grids.
+
+pyGTM is retained only as (a) the backend for the built-in material permittivity
+models in `materials.py`, and (b) an independent validation reference in
+`tests/test_engine_vs_pygtm.py`. It is GPL-3.0 — see the README License note.
 
 ### 3. UI (`src/multilayer_atm/ui/`)
 Streamlit composition split across:
