@@ -20,6 +20,15 @@ except Exception as exc:  # pragma: no cover - exercised by runtime environment 
         "(for example via `pip install \"pyGTM @ git+https://github.com/pyMatJ/pyGTM.git@7a228b7314ea66ae025ff346c0d0e8bfb86cc82c\"`) and retry."
     ) from exc
 
+# pyGTM emits a bare ``print('replaced gamma by Berreman')`` from inside
+# ``calculate_gamma`` every time a birefringent layer is detected. On a dispersion
+# map this fires once per (w, kx) sample, flooding stdout and adding measurable
+# overhead in the innermost loop. Birefringence handling is expected behaviour, not
+# an error, so silence the diagnostic by shadowing ``print`` in the module's global
+# namespace (module-level functions resolve ``print`` via their module dict before
+# falling back to builtins). This affects only pyGTM's own print calls.
+GTM.print = lambda *args, **kwargs: None  # type: ignore[attr-defined]
+
 
 ProgressCallback = Optional[Callable[[float, str], None]]
 
@@ -113,24 +122,47 @@ def _build_layer(layer_spec: LayerSpec, custom_materials: Mapping[str, Mapping[s
     )
 
 
-def _update_layer_no_eps(layer: GTM.Layer, f_hz: float, zeta: complex) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _layer_ai(layer: GTM.Layer, zeta: complex) -> np.ndarray:
+    """Build the boundary matrix Ai for a layer at the given zeta.
+
+    Mirrors the Ai construction in :py:meth:`GTM.Layer.calculate_transfer_matrix`
+    but skips the propagation matrix, the matrix products and the matrix inversion,
+    which are only needed when the full layer transfer matrix Ti is required.
+    Epsilon must already be set on the layer (via ``System.initialize_sys``).
+    """
     layer.calculate_matrices(zeta)
     layer.calculate_q()
     layer.calculate_gamma(zeta)
-    layer.calculate_transfer_matrix(f_hz, zeta)
-    ai = layer.Ai
+    gamma = layer.gamma
+    qs = layer.qs
+    inv_mu = 1.0 / layer.mu
+    ai = np.empty((4, 4), dtype=np.complex128)
+    ai[0, :] = gamma[:, 0]
+    ai[1, :] = gamma[:, 1]
+    ai[2, :] = (qs * gamma[:, 0] - zeta * gamma[:, 2]) * inv_mu
+    ai[3, :] = qs * gamma[:, 1] * inv_mu
+    return ai
+
+
+def _layer_ti(layer: GTM.Layer, f_hz: float, zeta: complex) -> np.ndarray:
+    """Full layer transfer matrix Ti = Ai @ Ki @ Ai^{-1} with a single inversion."""
+    ai = _layer_ai(layer, zeta)
+    phase = (-2.0j * np.pi * f_hz / GTM.c_const) * (layer.qs * layer.thick)
+    ki = np.diag(np.exp(phase))
     ai_inv = GTM.exact_inv(ai)
-    return ai, ai_inv, layer.Ti
+    return ai @ (ki @ ai_inv)
 
 
 def _calculate_gamma_star_no_eps(system: GTM.System, f_hz: float, zeta: complex) -> np.ndarray:
-    _, ai_inv_super, _ = _update_layer_no_eps(system.superstrate, f_hz, zeta)
-    ai_sub, _, _ = _update_layer_no_eps(system.substrate, f_hz, zeta)
+    # Boundary half-spaces only contribute their Ai: the superstrate via its inverse
+    # and the substrate directly. Computing their (discarded) transfer matrices and a
+    # second inversion per sample was redundant, so only the required pieces are built.
+    ai_inv_super = GTM.exact_inv(_layer_ai(system.superstrate, zeta))
+    ai_sub = _layer_ai(system.substrate, zeta)
 
     tloc = np.identity(4, dtype=np.complex128)
     for ii in range(len(system.layers) - 1, -1, -1):
-        _, _, ti = _update_layer_no_eps(system.layers[ii], f_hz, zeta)
-        tloc = ti @ tloc
+        tloc = _layer_ti(system.layers[ii], f_hz, zeta) @ tloc
 
     gamma = ai_inv_super @ (tloc @ ai_sub)
     gamma_star = DELTA1234 @ (gamma @ DELTA1234)
