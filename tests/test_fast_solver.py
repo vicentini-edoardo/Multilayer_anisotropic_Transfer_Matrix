@@ -21,7 +21,7 @@ def _biaxial_stack() -> StackSpec:
 
 def test_fast_dispersion_matches_per_point() -> None:
     stack = _biaxial_stack()
-    common = dict(w_min=700.0, w_max=1000.0, nw=18, kx_min=0.0, kx_max=500.0, nk=24, workers=1)
+    common = dict(w_min=700.0, w_max=1000.0, nw=18, kx_min=0.0, kx_max=5000.0, nk=24, workers=1)
     _w, _kx, slow = compute_rpp_map(stack, fast=False, **common)
     _w2, _kx2, fast = compute_rpp_map(stack, fast=True, **common)
     assert np.max(np.abs(slow - fast)) < 1e-10
@@ -29,7 +29,7 @@ def test_fast_dispersion_matches_per_point() -> None:
 
 def test_fast_isofrequency_matches_per_point() -> None:
     stack = _biaxial_stack()
-    common = dict(w0=850.0, kx_min=0.0, kx_max=500.0, nk=20, nphi=16, workers=1)
+    common = dict(w0=850.0, kx_min=0.0, kx_max=5000.0, nk=20, nphi=16, workers=1)
     _p, _kx, slow = compute_isofreq_map(stack, fast=False, **common)
     _p2, _kx2, fast = compute_isofreq_map(stack, fast=True, **common)
     assert np.max(np.abs(slow - fast)) < 1e-10

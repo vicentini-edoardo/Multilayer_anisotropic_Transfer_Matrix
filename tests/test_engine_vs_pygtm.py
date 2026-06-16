@@ -97,7 +97,10 @@ _STACKS = {
 def test_engine_matches_pygtm(name: str, fast: bool) -> None:
     layers = _STACKS[name]
     w_min, w_max, nw = 700.0, 1100.0, 21
-    kx_min, kx_max, nk = 0.0, 6.0, 31
+    # kx in cm^-1; zeta = kx/w must span the physically relevant range (~1-7),
+    # covering both propagating (zeta^2 < eps) and evanescent (zeta^2 > eps) modes.
+    # A low-kx-only grid (zeta ~ 0) hides sign/branch bugs in the evanescent modes.
+    kx_min, kx_max, nk = 0.0, 5000.0, 31
     ws = np.linspace(w_min, w_max, nw)
     kx = np.linspace(kx_min, kx_max, nk)
 

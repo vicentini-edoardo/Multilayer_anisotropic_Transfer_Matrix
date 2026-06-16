@@ -168,9 +168,14 @@ def _isotropic_qs_gamma(eps: complex, mu: complex, z: np.ndarray) -> tuple[np.nd
     """
     n = z.shape[0]
     D = mu * eps - z ** 2
-    # +sqrt is the forward (transmitted) branch under the same sign convention the
-    # eigen path's mode sort uses (Re>0, or Im>=0 for evanescent samples).
-    qt = np.sqrt(D)
+    # The forward (transmitted) root must match the convention the eigen path's mode
+    # sort uses: Im(q) >= 0 for evanescent samples, Re(q) > 0 for propagating ones.
+    # np.sqrt is the principal root (Re >= 0), which already satisfies Re > 0 for
+    # propagating samples; only the evanescent branch (D on the negative real axis,
+    # where the principal root is ~ -i|q|) needs its sign flipped to get Im >= 0.
+    r = np.sqrt(D)
+    flip = (np.abs(r.imag) >= _ZERO_THR) & (r.imag < 0.0)
+    qt = np.where(flip, -r, r)
 
     qs = np.empty((n, 4), dtype=np.complex128)
     qs[:, 0] = qt
