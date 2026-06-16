@@ -856,7 +856,7 @@ def _map_mode_trace_data(
     cached = cache.get(key)
     if cached is None:
         stack_for_run = stack.with_interior_alpha_offset(phi0)
-        with st.spinner("Locating reflectivity zeros (rpp=0)..."):
+        with st.spinner("Locating optical modes (rpp poles)..."):
             _w, kx_mode, residual, converged = compute_mode_dispersion(
                 stack_for_run,
                 w_min=float(wv[0]),
@@ -883,7 +883,7 @@ def _map_mode_trace_data(
 
 
 def _map_mode_trace_overlay(wv_cm1: np.ndarray, kxv_cm1: np.ndarray) -> dict[str, np.ndarray] | None:
-    """Build the heatmap overlay dict for the rpp-zero mode trace (UI kx units)."""
+    """Build the heatmap overlay dict for the rpp-pole mode trace (UI kx units)."""
     if not bool(st.session_state.get("show_mode_trace", False)):
         return None
     data = _map_mode_trace_data(wv_cm1, kxv_cm1)
@@ -896,13 +896,13 @@ def _map_mode_trace_overlay(wv_cm1: np.ndarray, kxv_cm1: np.ndarray) -> dict[str
     valid = np.asarray(converged, dtype=bool) & np.isfinite(re_ui)
     if not np.any(valid):
         return None
-    # Break the connecting line at frequencies with no genuine zero.
+    # Break the connecting line at frequencies with no genuine mode.
     x = np.where(valid, re_ui, np.nan)
     return {"x": x, "y": wv, "im": im_ui, "residual": np.asarray(residual, dtype=float)}
 
 
 def _mode_trace_export_bytes(wv_cm1: np.ndarray, kxv_cm1: np.ndarray) -> bytes | None:
-    """Serialize the rpp-zero trace (w, complex kx, residual) to CSV bytes."""
+    """Serialize the rpp-pole mode trace (w, complex kx, residual) to CSV bytes."""
     data = _map_mode_trace_data(wv_cm1, kxv_cm1)
     if data is None:
         return None
@@ -918,9 +918,9 @@ def _mode_trace_export_bytes(wv_cm1: np.ndarray, kxv_cm1: np.ndarray) -> bytes |
         ]
     )
     buffer = StringIO()
-    buffer.write("# mode trace: complex kx where rpp=0, as f(w)\n")
+    buffer.write("# mode trace: complex kx of the rpp pole (optical mode), as f(w)\n")
     buffer.write("# units: w=cm^-1, kx=cm^-1 (Re=mode wavevector, Im=loss)\n")
-    buffer.write("w,re_kx,im_kx,abs_rpp,converged\n")
+    buffer.write("w,re_kx,im_kx,abs_inv_rpp,converged\n")
     np.savetxt(buffer, table, delimiter=",", fmt="%.12g")
     return buffer.getvalue().encode("utf-8")
 
@@ -1185,15 +1185,16 @@ def _render_plot_toolbar(
         mode_row = st.columns([0.30, 0.70], gap=None, vertical_alignment="bottom")
         with mode_row[0]:
             st.toggle(
-                "Mode trace (rpp=0)",
+                "Mode trace (rpp pole)",
                 key="show_mode_trace",
                 disabled=not map_has_result,
                 help=(
                     "Overlay the optical mode on the dispersion map: for each frequency, "
-                    "find the complex in-plane wavevector where the p-polarized reflection "
-                    "coefficient rpp vanishes (a true reflectivity zero). The real part is "
-                    "drawn as a connected line; hover shows the imaginary part (modal loss) "
-                    "and the residual |rpp|. Only available for the Im(rpp) map."
+                    "find the complex in-plane wavevector of the pole of the p-polarized "
+                    "reflection coefficient rpp (where the dispersion determinant vanishes) "
+                    "— the bright band of the map. The real part is drawn as a connected "
+                    "line; hover shows the imaginary part (modal loss) and the residual "
+                    "|1/rpp|. Only available for the Im(rpp) map."
                 ),
             )
         with mode_row[1]:
@@ -1204,12 +1205,12 @@ def _render_plot_toolbar(
                     st.download_button(
                         ":material/download: Export mode trace",
                         data=trace_bytes,
-                        file_name=f"{_stack_plot_filename_stem('mode-trace-rpp-zero')}.csv",
+                        file_name=f"{_stack_plot_filename_stem('mode-trace-rpp-pole')}.csv",
                         mime="text/csv",
                         width="stretch",
                     )
                 else:
-                    st.caption(":material/info: No reflectivity zero found on the current grid.")
+                    st.caption(":material/info: No optical mode found on the current grid.")
 
         action_row = st.columns([0.22, 0.26, 0.26, 0.26], gap=None, vertical_alignment="center")
         with action_row[0]:

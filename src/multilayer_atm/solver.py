@@ -171,24 +171,26 @@ def _worker_compute_row_task(task: Tuple[int, float, float]) -> Tuple[int, np.nd
 def _find_mode_for_frequency(
     system: engine.System, w_cm1: float, kx_values_cm1: np.ndarray, fast: bool
 ) -> Tuple[complex, float, bool]:
-    """Locate the complex kx where rpp = 0 at a single frequency.
+    """Locate the complex kx of the optical mode (pole of rpp) at one frequency.
 
-    The real-kx row gives the starting guess (the kx of minimum |rpp|), which is
-    then refined into the complex plane by :func:`solver_fast.find_rpp_zero`.
+    The optical modes are the poles of rpp (the bright bands of the Im(rpp) map):
+    the dispersion determinant vanishes there. The real-kx row gives the starting
+    guess (the kx of *maximum* |rpp|, the on-axis trace of the pole), which is then
+    refined into the complex plane by :func:`solver_fast.find_rpp_pole`.
     Returns ``(kx_complex_cm1, residual, converged)``; ``kx_complex_cm1`` is
     ``zeta * w`` in cm⁻¹ (real part = mode wavevector, imaginary part = loss).
     """
     f_hz = float(w_cm1 * CM1_TO_HZ)
     # Evaluates the row (which initialises the system at f_hz) and gives the
-    # coarse grid guess for the zero.
+    # coarse grid guess for the pole (the |rpp| peak on the real axis).
     row = _compute_row(system, w_cm1, kx_values_cm1, fast)
     mag = np.abs(np.asarray(row))
     finite = np.isfinite(mag)
     if not np.any(finite):
         return complex(np.nan, np.nan), float("inf"), False
-    j0 = int(np.argmin(np.where(finite, mag, np.inf)))
+    j0 = int(np.argmax(np.where(finite, mag, -np.inf)))
     zeta0 = complex(float(kx_values_cm1[j0]) / float(w_cm1), 0.0)
-    zeta, residual, converged = solver_fast.find_rpp_zero(system, f_hz, zeta0)
+    zeta, residual, converged = solver_fast.find_rpp_pole(system, f_hz, zeta0)
     return complex(zeta * w_cm1), float(residual), bool(converged)
 
 
@@ -408,7 +410,7 @@ def _run_parallel_modes(
     kx_array = np.asarray(kx_values_cm1, dtype=float)
 
     if progress:
-        progress(0.0, "Locating reflectivity zeros: scheduling workers")
+        progress(0.0, "Locating optical modes: scheduling workers")
 
     tasks = [(i, float(w), 0.0) for i, w in enumerate(w_values_cm1)]
     chunk = max(1, len(tasks) // (workers * 4))
@@ -426,17 +428,17 @@ def _run_parallel_modes(
             converged[i] = ok
             done += 1
             if progress:
-                progress(done / total, f"Locating reflectivity zeros: {done}/{total} frequencies")
+                progress(done / total, f"Locating optical modes: {done}/{total} frequencies")
     except (BrokenProcessPool, OSError):
         pool.shutdown(wait=False, cancel_futures=True)
         if progress:
-            progress(0.0, "Locating reflectivity zeros: parallel unavailable, falling back to serial")
+            progress(0.0, "Locating optical modes: parallel unavailable, falling back to serial")
         system = _build_system(stack_spec, custom_materials=payload.get("custom_materials", {}))
         total = len(tasks)
         for done, (i, w, _phi) in enumerate(tasks, start=1):
             kx_mode[i], residual[i], converged[i] = _find_mode_for_frequency(system, w, kx_array, fast)
             if progress:
-                progress(done / total, f"Locating reflectivity zeros: {done}/{total} frequencies (serial fallback)")
+                progress(done / total, f"Locating optical modes: {done}/{total} frequencies (serial fallback)")
     except BaseException:
         pool.shutdown(wait=False, cancel_futures=True)
         raise
@@ -459,16 +461,18 @@ def compute_mode_dispersion(
     custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
     fast: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Trace the optical mode (complex zero of rpp) as a function of frequency.
+    """Trace the optical mode (complex pole of rpp) as a function of frequency.
 
-    For each frequency the reduced wavevector ``zeta`` that solves ``rpp(zeta) = 0``
-    is found: the ``|rpp|`` minimum on the real ``kx`` grid seeds a complex-plane
-    Newton refinement. The returned ``kx_mode`` is complex (``zeta * w`` in cm⁻¹);
-    its real part is the mode wavevector and its imaginary part the modal loss.
+    For each frequency the reduced wavevector ``zeta`` of the mode -- the pole of
+    rpp, where the p-polarised dispersion determinant vanishes -- is found: the
+    ``|rpp|`` maximum on the real ``kx`` grid seeds a complex-plane Newton
+    refinement of ``1/rpp = 0``. The returned ``kx_mode`` is complex
+    (``zeta * w`` in cm⁻¹); its real part is the mode wavevector and its imaginary
+    part the modal loss.
 
     Returns ``(w_values, kx_mode_cm1, residual, converged)``. ``residual`` is the
-    final ``|rpp|`` and ``converged`` flags the frequencies where the search reached
-    a genuine zero (callers should drop the rest).
+    final ``|1/rpp|`` and ``converged`` flags the frequencies where the search
+    reached a genuine pole (callers should drop the rest).
     """
     stack = stack_spec.enforce_boundary_layers()
     stack.validate()
@@ -497,6 +501,6 @@ def compute_mode_dispersion(
         for i, w in enumerate(w_values):
             kx_mode[i], residual[i], converged[i] = _find_mode_for_frequency(system, float(w), kx_values, fast)
             if progress:
-                progress((i + 1) / len(w_values), f"Locating reflectivity zeros: {i + 1}/{len(w_values)} frequencies")
+                progress((i + 1) / len(w_values), f"Locating optical modes: {i + 1}/{len(w_values)} frequencies")
 
     return w_values, kx_mode, residual, converged

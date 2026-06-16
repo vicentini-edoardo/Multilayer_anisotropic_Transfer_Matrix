@@ -262,7 +262,7 @@ def plot_heatmap(
             markersize=3.0,
             markeredgecolor="#0c1420",
             markeredgewidth=0.4,
-            label="Mode (rpp=0)",
+            label="Mode (rpp pole)",
         )
         ax.set_xlim(float(xx.min()), float(xx.max()))
         ax.set_ylim(float(yy.min()), float(yy.max()))
@@ -334,7 +334,7 @@ def plot_heatmap_interactive(
                 mode="lines+markers",
                 line=dict(color="#39ff14", width=2),
                 marker=dict(size=4, color="#39ff14", line=dict(color=chrome["marker_edge"], width=0.6)),
-                name="Mode (rpp=0)",
+                name="Mode (rpp pole)",
                 connectgaps=False,
                 customdata=np.column_stack(
                     [
@@ -344,7 +344,7 @@ def plot_heatmap_interactive(
                 ),
                 hovertemplate=(
                     "w=%{y:.3f}<br>Re kx=%{x:.4f}<br>Im kx=%{customdata[0]:.4g}"
-                    "<br>|rpp|=%{customdata[1]:.2e}<extra></extra>"
+                    "<br>|1/rpp|=%{customdata[1]:.2e}<extra></extra>"
                 ),
             )
         )

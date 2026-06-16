@@ -35,10 +35,13 @@ Frozen dataclasses: `DopingSpec` → `LayerSpec` → `StackSpec`. These are the 
 `solver.py` exposes three public entry points and orchestrates parallelism:
 - `compute_rpp_map()` — dispersion map: Im(rpp) as f(ω, kx)
 - `compute_isofreq_map()` — isofrequency diagram: Im(rpp) as f(φ, kx) at fixed ω
-- `compute_mode_dispersion()` — mode trace: the complex in-plane wavevector kx where
-  rpp = 0, as f(ω). Per frequency it seeds from the |rpp| minimum on the real kx grid
-  and refines into the complex plane via `solver_fast.find_rpp_zero` (damped Newton).
-  The UI overlays Re(kx) on the dispersion map ("Mode trace (rpp=0)" toggle).
+- `compute_mode_dispersion()` — mode trace: the complex in-plane wavevector kx of the
+  optical mode (the **pole** of rpp, where the p-polarised dispersion determinant
+  vanishes — the bright band of the Im(rpp) map), as f(ω). Per frequency it seeds from
+  the |rpp| maximum on the real kx grid and refines `1/rpp = 0` into the complex plane
+  via `solver_fast.find_rpp_pole` (damped Newton). The UI overlays Re(kx) on the
+  dispersion map ("Mode trace (rpp pole)" toggle). `solver_fast.find_rpp_zero` (the
+  reflection-zero finder) is retained for completeness but is not the mode condition.
 
 Uses `ProcessPoolExecutor` (up to 4 workers) with serial fallback. Converts the
 Passler z-x-z Euler angles to the (theta, phi, psi) ordering the engine expects
