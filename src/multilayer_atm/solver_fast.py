@@ -521,10 +521,24 @@ def _newton_complex_zero(
     that does not reduce ``|value|`` (or lands on a non-finite sample) is damped,
     which keeps the search from running off toward a singularity of ``value_at``.
 
+    Reflection zeros and poles come in mirror ``+/-zeta`` pairs, so an undamped
+    Newton step can overshoot across ``Re(zeta) = 0`` onto the opposite-branch root
+    -- which has the same residual and would make the mode trace flip sign between
+    frequencies. The iterate is therefore confined to the half-plane of the seed's
+    real part (any trial crossing the imaginary axis is rejected and damped), which
+    keeps consecutive frequencies on the same physical branch.
+
     Returns ``(zeta, residual, converged)``; ``converged`` is ``True`` only when
     the residual reached ``tol``.
     """
     z = complex(zeta0)
+    re_sign = float(np.sign(z.real))
+
+    def on_branch(w: complex) -> bool:
+        # Stay on the seed's side of the imaginary axis (no constraint if the seed
+        # sits on it). ``Re(w) == 0`` is permitted so the boundary is never excluded.
+        return re_sign == 0.0 or (w.real * re_sign) >= 0.0
+
     fz = value_at(z)
     if not np.isfinite(fz):
         return z, float("inf"), False
@@ -540,11 +554,11 @@ def _newton_complex_zero(
         damp = 1.0
         z_new = z - step
         fz_new = value_at(z_new)
-        while (not np.isfinite(fz_new) or abs(fz_new) > abs(fz)) and damp > 1e-4:
+        while (not on_branch(z_new) or not np.isfinite(fz_new) or abs(fz_new) > abs(fz)) and damp > 1e-4:
             damp *= 0.5
             z_new = z - damp * step
             fz_new = value_at(z_new)
-        if not np.isfinite(fz_new) or abs(fz_new) >= abs(fz):
+        if not on_branch(z_new) or not np.isfinite(fz_new) or abs(fz_new) >= abs(fz):
             break
         z, fz = z_new, fz_new
 
