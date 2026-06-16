@@ -21,6 +21,8 @@ amortising LAPACK/Python overhead.
 
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
 
 from . import engine
@@ -474,14 +476,94 @@ def _rpp_raw_from_zeta(system: engine.System, f_hz: float, z: np.ndarray) -> np.
 
     :func:`_rpp_from_zeta` maps non-finite samples to zero, which would conflate a
     genuine reflection zero (numerator -> 0) with a pole (denominator -> 0). The
-    mode finder needs the unmasked ratio so Newton iterations converge onto true
-    zeros of rpp and are repelled by poles (where |rpp| is large, not small).
+    mode finder needs the unmasked ratio so Newton iterations are not misled by the
+    masking.
     """
     gs = _batched_gamma_star(system, f_hz, z)
     denom = gs[:, 0, 0] * gs[:, 2, 2] - gs[:, 0, 2] * gs[:, 2, 0]
     numer = gs[:, 1, 0] * gs[:, 2, 2] - gs[:, 1, 2] * gs[:, 2, 0]
     with np.errstate(divide="ignore", invalid="ignore"):
         return numer / denom
+
+
+def _inv_rpp_raw_from_zeta(system: engine.System, f_hz: float, z: np.ndarray) -> np.ndarray:
+    """Reciprocal reflection coefficient ``1/rpp = denom/numer`` over a zeta array.
+
+    The optical modes of the stack -- the bright bands in the Im(rpp) dispersion
+    map -- are the **poles** of rpp, i.e. the zeros of the p-block determinant
+    ``denom = G00*G22 - G02*G20`` (the dispersion relation for a self-sustaining
+    field with no incident p-wave). Searching for ``1/rpp -> 0`` lands the Newton
+    iteration on a true pole and is repelled by the reflection zeros (where
+    ``|1/rpp|`` is large) -- the mirror image of :func:`_rpp_raw_from_zeta`. Using
+    the reciprocal rather than ``denom`` alone keeps the residual dimensionless and
+    on the same scale as :func:`find_rpp_zero`, and is naturally repelled by the
+    spurious common roots where numerator and denominator vanish together.
+    """
+    gs = _batched_gamma_star(system, f_hz, z)
+    denom = gs[:, 0, 0] * gs[:, 2, 2] - gs[:, 0, 2] * gs[:, 2, 0]
+    numer = gs[:, 1, 0] * gs[:, 2, 2] - gs[:, 1, 2] * gs[:, 2, 0]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return denom / numer
+
+
+def _newton_complex_zero(
+    value_at: Callable[[complex], complex],
+    zeta0: complex,
+    *,
+    max_iter: int,
+    tol: float,
+    step_eps: float,
+) -> tuple[complex, float, bool]:
+    """Damped Newton search for a complex zero of an analytic ``value_at(zeta)``.
+
+    Starting from ``zeta0`` a Newton iteration (central-difference derivative)
+    refines the root into the complex plane to sub-grid precision. Any trial step
+    that does not reduce ``|value|`` (or lands on a non-finite sample) is damped,
+    which keeps the search from running off toward a singularity of ``value_at``.
+
+    Returns ``(zeta, residual, converged)``; ``converged`` is ``True`` only when
+    the residual reached ``tol``.
+    """
+    z = complex(zeta0)
+    fz = value_at(z)
+    if not np.isfinite(fz):
+        return z, float("inf"), False
+
+    for _ in range(int(max_iter)):
+        if abs(fz) < tol:
+            return z, float(abs(fz)), True
+        h = step_eps * max(abs(z), 1.0)
+        df = (value_at(z + h) - value_at(z - h)) / (2.0 * h)
+        if df == 0 or not np.isfinite(df):
+            break
+        step = fz / df
+        damp = 1.0
+        z_new = z - step
+        fz_new = value_at(z_new)
+        while (not np.isfinite(fz_new) or abs(fz_new) > abs(fz)) and damp > 1e-4:
+            damp *= 0.5
+            z_new = z - damp * step
+            fz_new = value_at(z_new)
+        if not np.isfinite(fz_new) or abs(fz_new) >= abs(fz):
+            break
+        z, fz = z_new, fz_new
+
+    return z, float(abs(fz)), bool(abs(fz) < tol)
+
+
+def _pointwise_objective(
+    raw_fn: Callable[[engine.System, float, np.ndarray], np.ndarray],
+    system: engine.System,
+    f_hz: float,
+) -> Callable[[complex], complex]:
+    def value_at(zeta: complex) -> complex:
+        try:
+            value = raw_fn(system, f_hz, np.array([zeta], dtype=np.complex128))[0]
+        except (FastPathUnavailable, np.linalg.LinAlgError, FloatingPointError, ValueError):
+            return complex(np.nan, np.nan)
+        return complex(value)
+
+    return value_at
 
 
 def find_rpp_zero(
@@ -497,47 +579,49 @@ def find_rpp_zero(
 
     ``system`` must already be initialised at ``f_hz`` (e.g. via a prior row
     evaluation). Starting from ``zeta0`` -- typically the ``|rpp|`` minimum on the
-    real kx grid -- a damped Newton iteration refines the root into the complex
-    plane to sub-grid precision. The derivative is a central finite difference
-    (rpp is analytic in zeta). The damping rejects any trial step that does not
-    reduce ``|rpp|`` (or lands on a non-finite sample), which keeps the search from
-    running off toward a pole.
+    real kx grid -- a damped Newton iteration refines the reflection zero into the
+    complex plane. Returns ``(zeta, residual, converged)`` with ``residual`` the
+    final ``|rpp(zeta)|``.
 
-    Returns ``(zeta, residual, converged)`` where ``residual`` is ``|rpp(zeta)|``
-    and ``converged`` is ``True`` only when the residual reached ``tol``. A failed
-    or diverging search returns ``converged=False`` so the caller can drop the
-    point rather than draw a spurious mode.
+    Note: this finds a *reflection zero* (Brewster/Zenneck-like), not a guided
+    mode. The optical modes (the bright bands of the Im(rpp) map) are the poles of
+    rpp -- use :func:`find_rpp_pole` for those.
     """
+    return _newton_complex_zero(
+        _pointwise_objective(_rpp_raw_from_zeta, system, f_hz),
+        zeta0,
+        max_iter=max_iter,
+        tol=tol,
+        step_eps=step_eps,
+    )
 
-    def rpp_at(zeta: complex) -> complex:
-        try:
-            value = _rpp_raw_from_zeta(system, f_hz, np.array([zeta], dtype=np.complex128))[0]
-        except (FastPathUnavailable, np.linalg.LinAlgError, FloatingPointError, ValueError):
-            return complex(np.nan, np.nan)
-        return complex(value)
 
-    z = complex(zeta0)
-    fz = rpp_at(z)
-    if not np.isfinite(fz):
-        return z, float("inf"), False
+def find_rpp_pole(
+    system: engine.System,
+    f_hz: float,
+    zeta0: complex,
+    *,
+    max_iter: int = 60,
+    tol: float = 1e-9,
+    step_eps: float = 1e-6,
+) -> tuple[complex, float, bool]:
+    """Locate the complex reduced wavevector ``zeta`` of an optical mode.
 
-    for _ in range(int(max_iter)):
-        if abs(fz) < tol:
-            return z, float(abs(fz)), True
-        h = step_eps * max(abs(z), 1.0)
-        df = (rpp_at(z + h) - rpp_at(z - h)) / (2.0 * h)
-        if df == 0 or not np.isfinite(df):
-            break
-        step = fz / df
-        damp = 1.0
-        z_new = z - step
-        fz_new = rpp_at(z_new)
-        while (not np.isfinite(fz_new) or abs(fz_new) > abs(fz)) and damp > 1e-4:
-            damp *= 0.5
-            z_new = z - damp * step
-            fz_new = rpp_at(z_new)
-        if not np.isfinite(fz_new) or abs(fz_new) >= abs(fz):
-            break
-        z, fz = z_new, fz_new
+    A mode is a **pole** of rpp -- equivalently a zero of ``1/rpp = denom/numer``,
+    where ``denom`` is the p-polarised dispersion determinant. ``system`` must
+    already be initialised at ``f_hz``. Starting from ``zeta0`` -- typically the
+    ``|rpp|`` maximum on the real kx grid (the on-axis trace of the pole) -- a
+    damped Newton iteration refines the pole into the complex plane to sub-grid
+    precision; the real part is the mode wavevector and the imaginary part its loss.
 
-    return z, float(abs(fz)), bool(abs(fz) < tol)
+    Returns ``(zeta, residual, converged)`` where ``residual`` is ``|1/rpp(zeta)|``
+    and ``converged`` is ``True`` only when it reached ``tol``. A failed or
+    diverging search returns ``converged=False`` so the caller can drop the point.
+    """
+    return _newton_complex_zero(
+        _pointwise_objective(_inv_rpp_raw_from_zeta, system, f_hz),
+        zeta0,
+        max_iter=max_iter,
+        tol=tol,
+        step_eps=step_eps,
+    )
