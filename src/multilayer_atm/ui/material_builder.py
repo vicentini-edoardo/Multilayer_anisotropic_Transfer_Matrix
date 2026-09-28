@@ -75,6 +75,21 @@ def _reset_dialog_keys() -> None:
             st.session_state.pop(suffix, None)
 
 
+def _dismiss_custom_material_dialog() -> None:
+    state = st.session_state
+    target = state.get(CUSTOM_MATERIAL_DIALOG_TARGET_KEY)
+    previous = state.get(CUSTOM_MATERIAL_DIALOG_PREVIOUS_KEY)
+    if target and previous is not None:
+        state[target] = previous
+    _reset_dialog_keys()
+    state[CUSTOM_MATERIAL_DIALOG_OPEN_KEY] = False
+    state[CUSTOM_MATERIAL_DIALOG_EDIT_MODE_KEY] = False
+    state[CUSTOM_MATERIAL_DIALOG_ORIGINAL_NAME_KEY] = None
+    state[CUSTOM_MATERIAL_DIALOG_TARGET_KEY] = None
+    state[CUSTOM_MATERIAL_DIALOG_PREVIOUS_KEY] = None
+    state[CUSTOM_MATERIAL_DIALOG_IMPORT_DIGEST_KEY] = None
+
+
 def _load_definition_into_dialog(definition: Mapping[str, Any]) -> None:
     _reset_dialog_keys()
     st.session_state[_dialog_key("name")] = str(definition["name"])
@@ -124,6 +139,8 @@ def _ensure_dialog_defaults() -> None:
 def _material_selection_callback(material_key: str, previous_material: str) -> None:
     if st.session_state.get(material_key) != ADD_NEW_MATERIAL_OPTION:
         return
+    _reset_dialog_keys()
+    st.session_state[CUSTOM_MATERIAL_DIALOG_IMPORT_DIGEST_KEY] = None
     st.session_state[CUSTOM_MATERIAL_DIALOG_TARGET_KEY] = material_key
     st.session_state[CUSTOM_MATERIAL_DIALOG_PREVIOUS_KEY] = previous_material
     st.session_state[CUSTOM_MATERIAL_DIALOG_OPEN_KEY] = True
@@ -332,6 +349,7 @@ def open_edit_custom_material_dialog(
     if definition is None:
         return
     _reset_dialog_keys()
+    st.session_state[CUSTOM_MATERIAL_DIALOG_IMPORT_DIGEST_KEY] = None
     _load_definition_into_dialog(definition)
     st.session_state[CUSTOM_MATERIAL_DIALOG_TARGET_KEY] = material_key
     st.session_state[CUSTOM_MATERIAL_DIALOG_PREVIOUS_KEY] = material_name
@@ -356,7 +374,7 @@ def render_edit_custom_material_button(
         open_edit_custom_material_dialog(material_name, material_key)
 
 
-@st.dialog("Custom material", width="large")
+@st.dialog("Custom material", width="large", on_dismiss=_dismiss_custom_material_dialog)
 def _render_custom_material_dialog(builtin_catalog: Sequence[str]) -> None:
     edit_mode = bool(st.session_state.get(CUSTOM_MATERIAL_DIALOG_EDIT_MODE_KEY, False))
     original_name = st.session_state.get(CUSTOM_MATERIAL_DIALOG_ORIGINAL_NAME_KEY)
@@ -402,13 +420,7 @@ def _render_custom_material_dialog(builtin_catalog: Sequence[str]) -> None:
 
     action_cols = st.columns(2, gap="small")
     if action_cols[0].button("Cancel", width="stretch"):
-        target_key = st.session_state.get(CUSTOM_MATERIAL_DIALOG_TARGET_KEY)
-        previous_material = st.session_state.get(CUSTOM_MATERIAL_DIALOG_PREVIOUS_KEY)
-        if target_key and previous_material is not None:
-            st.session_state[target_key] = previous_material
-        st.session_state[CUSTOM_MATERIAL_DIALOG_OPEN_KEY] = False
-        st.session_state[CUSTOM_MATERIAL_DIALOG_EDIT_MODE_KEY] = False
-        st.session_state[CUSTOM_MATERIAL_DIALOG_ORIGINAL_NAME_KEY] = None
+        _dismiss_custom_material_dialog()
         st.rerun()
 
     save_label = "Save changes" if edit_mode else "Add material"
