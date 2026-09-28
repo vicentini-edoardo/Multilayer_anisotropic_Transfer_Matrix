@@ -108,7 +108,7 @@ def _shade_side_color(base: str, normal: np.ndarray, shade_target: str) -> tuple
 
 def _is_vacuum_material(material: str) -> bool:
     m = material.strip().lower()
-    return m in {"vac", "vacuum", "air"}
+    return m in {"vacuum"}
 
 
 def plot_stack_pseudo3d(stack: StackSpec) -> plt.Figure:

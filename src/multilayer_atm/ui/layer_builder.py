@@ -49,7 +49,7 @@ CALC_STATE_KEYS_TO_PRESERVE: Sequence[str] = (
     "iso_state",
 )
 
-def _new_layer(material: str = "vac", thickness_m: float = 0.1e-6) -> Dict[str, object]:
+def _new_layer(material: str = "vacuum", thickness_m: float = 0.1e-6) -> Dict[str, object]:
     layer_id = f"layer_{st.session_state.layer_seq}"
     st.session_state.layer_seq += 1
     return {
@@ -386,7 +386,7 @@ def render_stack_panel(catalog: Sequence[str], notes: Mapping[str, str], show_he
         try:
             with st.container(horizontal=True, horizontal_alignment="distribute"):
                 if st.button(":material/add: Add layer", width="stretch"):
-                    new_layer = _new_layer(material="vac", thickness_m=0.1e-6)
+                    new_layer = _new_layer(material="vacuum", thickness_m=0.1e-6)
                     st.session_state.layers.insert(1, new_layer)
                     st.session_state.selected_layer_id = str(new_layer["id"])
                     _preserve_calc_state_before_rerun()
@@ -407,7 +407,7 @@ def render_stack_panel(catalog: Sequence[str], notes: Mapping[str, str], show_he
             action_cols = st.columns(3, gap=None)
             with action_cols[0]:
                 if st.button(":material/add: Add layer", width="stretch"):
-                    new_layer = _new_layer(material="vac", thickness_m=0.1e-6)
+                    new_layer = _new_layer(material="vacuum", thickness_m=0.1e-6)
                     st.session_state.layers.insert(1, new_layer)
                     st.session_state.selected_layer_id = str(new_layer["id"])
                     _preserve_calc_state_before_rerun()

@@ -11,10 +11,10 @@ from multilayer_atm.solver import compute_isofreq_map, compute_rpp_map
 def _biaxial_stack() -> StackSpec:
     return StackSpec.from_layers(
         [
-            LayerSpec("air", 0.0, (0.0, 0.0, 0.0), DopingSpec()),
+            LayerSpec("vacuum", 0.0, (0.0, 0.0, 0.0), DopingSpec()),
             LayerSpec("hBN", 100e-9, (10.0, 20.0, 30.0), DopingSpec()),
             LayerSpec("MoO3", 150e-9, (5.0, 15.0, 25.0), DopingSpec()),
-            LayerSpec("SiC", 1e-6, (0.0, 0.0, 0.0), DopingSpec()),
+            LayerSpec("SiC3C", 1e-6, (0.0, 0.0, 0.0), DopingSpec()),
         ]
     )
 

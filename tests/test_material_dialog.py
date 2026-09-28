@@ -27,8 +27,8 @@ def test_new_custom_material_starts_without_abandoned_draft(monkeypatch):
     }
     monkeypatch.setattr(builder.st, "session_state", state)
 
-    builder.handle_material_selection_change("mat_1", "SiC")
+    builder.handle_material_selection_change("mat_1", "SiC3C")
 
     assert "custom_material_dialog_name" not in state
     assert state[builder.CUSTOM_MATERIAL_DIALOG_OPEN_KEY] is True
-    assert state["mat_1"] == "SiC"
+    assert state["mat_1"] == "SiC3C"

@@ -9,9 +9,9 @@ from multilayer_atm.solver import compute_isofreq_map
 def _three_layer_stack(euler_deg: tuple[float, float, float]) -> StackSpec:
     return StackSpec.from_layers(
         [
-            LayerSpec("air", 0.0, (0.0, 0.0, 0.0), DopingSpec()),
+            LayerSpec("vacuum", 0.0, (0.0, 0.0, 0.0), DopingSpec()),
             LayerSpec("hBN", 100e-9, euler_deg, DopingSpec()),
-            LayerSpec("air", 0.0, (0.0, 0.0, 0.0), DopingSpec()),
+            LayerSpec("vacuum", 0.0, (0.0, 0.0, 0.0), DopingSpec()),
         ]
     )
 

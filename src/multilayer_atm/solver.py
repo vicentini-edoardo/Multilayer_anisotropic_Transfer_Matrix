@@ -41,21 +41,8 @@ def zeta_from_kx_w(kx_cm1: np.ndarray | float, w_cm1: np.ndarray | float) -> np.
     return kx / w
 
 
-def passler_to_pygtm_euler(euler_deg: Sequence[float]) -> Tuple[float, float, float]:
-    """
-    Convert MATLAB Passler z-x-z Euler convention to pyGTM ordering.
-
-    Passler angles are (alpha, beta, gamma) in degrees.
-    pyGTM expects arguments (theta, phi, psi) where:
-    theta = beta, phi = alpha, psi = gamma.
-
-    NOTE: this is an angle re-labelling only. It is exact when both libraries
-    share the same intrinsic z-x-z axis sequence. If pyGTM is ever found to use
-    a different sequence (e.g. z-y-z), this mapping must be corrected and
-    validated against a known reference (e.g. a uniaxial crystal at a fixed
-    orientation) — relabelling alone would otherwise introduce a silent
-    physics error.
-    """
+def passler_euler_radians(euler_deg: Sequence[float]) -> Tuple[float, float, float]:
+    """Map Passler (alpha, beta, gamma) degrees to engine (theta, phi, psi) radians."""
     alpha, beta, gamma = euler_deg
     theta = np.deg2rad(beta)
     phi = np.deg2rad(alpha)
@@ -86,7 +73,7 @@ def _build_system(stack_spec: StackSpec, custom_materials: Mapping[str, Mapping[
 
 def _build_layer(layer_spec: LayerSpec, custom_materials: Mapping[str, Mapping[str, Any]] | None = None) -> engine.Layer:
     axes = axes_for_material(layer_spec.material, layer_spec.doping, custom_materials=custom_materials)
-    theta, phi, psi = passler_to_pygtm_euler(layer_spec.euler_deg)
+    theta, phi, psi = passler_euler_radians(layer_spec.euler_deg)
     return engine.Layer(
         thickness=float(layer_spec.thickness_m),
         epsilon1=axes.fx,

@@ -3,9 +3,8 @@
 This module is the numerical core of the solver. It implements the generalized
 4x4 transfer-matrix algorithm (Passler & Paarmann 2017) directly in NumPy,
 batched over the in-plane momentum axis: all kx samples of a single
-frequency/angle row are processed in one set of array operations. It depends only
-on the lightweight :mod:`multilayer_atm.engine` containers (no pyGTM at runtime);
-pyGTM is retained solely as an independent validation reference for the tests.
+frequency/angle row are processed in one set of array operations. It uses
+the :mod:`multilayer_atm.engine` containers.
 
 :func:`compute_row_batched` evaluates a whole row at once. It assumes
 * the four out-of-plane modes split cleanly into two forward and two backward

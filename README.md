@@ -1,6 +1,6 @@
 # Multilayer Anisotropic Transfer Matrix
 
-A scientific Streamlit application for building multilayer optical stacks, assigning anisotropic material models, and exploring `Im(rpp)` dispersion and isofrequency maps with a pyGTM-based transfer-matrix solver.
+A scientific Streamlit application for building multilayer optical stacks, assigning anisotropic material models, and exploring `Im(rpp)` dispersion and isofrequency maps with an in-house transfer-matrix solver and a shared materials catalog.
 
 Live app: <https://multilayeranisotropictransfermatrix-ev.streamlit.app>
 Repository: <https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix>
@@ -11,7 +11,7 @@ Repository: <https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfe
 
 This repository packages a research-oriented interface around an anisotropic transfer-matrix workflow for stratified media. The app is intended for rapid exploration of multilayer stacks with rotated anisotropic layers, semi-infinite boundary media, and optional Drude terms for free-carrier contributions.
 
-The implementation is based on the generalized 4×4 formalism described by Passler and Paarmann and uses `pyGTM` as the numerical backend for the underlying electromagnetic system matrices.
+The implementation is based on the generalized 4×4 formalism described by Passler and Paarmann with an in-house numerical engine. Built-in material models come from the `Materials_Library` package.
 
 ## Main features
 
@@ -124,16 +124,13 @@ Runtime dependencies are declared in both `requirements.txt` and `pyproject.toml
 - `scipy`
 - `matplotlib`
 - `plotly`
-- `pyGTM` (GPL-3.0) — still required at runtime for the built-in material models
-  (`materials.py`); the transfer-matrix engine no longer uses it. See the
-  [License](#license) note.
+- `materials-library` — pinned to a Git commit for built-in material definitions and permittivity models
 
 ## Original code and references
 
-This public repository packages and cleans up a scientific codebase built around the original anisotropic transfer-matrix workflow and `pyGTM`-based material/system handling. Please also credit the upstream scientific and software work when using this project:
+This public repository packages a scientific anisotropic transfer-matrix workflow. Please credit the scientific work when using this project:
 
 - N. C. Passler and A. Paarmann, "Generalized 4 x 4 matrix formalism for light propagation in anisotropic stratified media: study of surface phonon polaritons in polar dielectric heterostructures," *Journal of the Optical Society of America B* **34**(10), 2128 (2017). DOI: [10.1364/JOSAB.34.002128](https://doi.org/10.1364/JOSAB.34.002128)
-- M. Jeannin, *pyGTM* [software], GitHub repository, <https://github.com/pyMatJ/pyGTM> (accessed 2026-04-09)
 - E. Vicentini, *Multilayer anisotropic transfer matrix* [software], GitHub repository, <https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix> (accessed 2026-04-09)
 
 ## Citation
@@ -142,7 +139,6 @@ If you use this repository in academic work, please cite:
 
 - this software repository
 - the Passler and Paarmann publication above
-- the `pyGTM` project when relevant
 
 Citation metadata is provided in [`CITATION.cff`](CITATION.cff).
 
@@ -156,17 +152,4 @@ CIC nanoGUNE
 The source code in this repository is distributed under the MIT License. See
 [`LICENSE`](LICENSE).
 
-**Third-party licensing note.** The transfer-matrix engine
-(`multilayer_atm/engine.py` and `multilayer_atm/solver_fast.py`) is now an
-independent in-house implementation and does **not** import pyGTM at runtime.
-However, the project still depends on [`pyGTM`](https://github.com/pyMatJ/pyGTM)
-(© M. Jeannin, **GPL-3.0**) at runtime through the built-in material models in
-`multilayer_atm/materials.py`, and uses it as a validation reference in the test
-suite. Because pyGTM is GPL-3.0, any distribution that bundles or requires it
-forms a combined work governed by the GPL-3.0 terms, notwithstanding the MIT
-license on this repository's own code. This will be resolved by replacing the
-remaining pyGTM-based material models with clean-room implementations sourced from
-the primary literature, after which the project will be MIT-clean end to end.
-
-This is an informational summary, not legal advice; seek a qualified opinion
-before redistribution.
+The shared material catalog is maintained in `Materials_Library`.

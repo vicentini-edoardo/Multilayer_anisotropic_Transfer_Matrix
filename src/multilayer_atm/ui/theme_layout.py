@@ -145,10 +145,6 @@ def render_footer() -> None:
         'DOI: https://doi.org/10.1364/JOSAB.34.002128'
     )
     st.caption(
-        "Software: M. Jeannin, pyGTM [software], GitHub repository, "
-        "https://github.com/pyMatJ/pyGTM (accessed 2026-04-09)"
-    )
-    st.caption(
         "Software: E. Vicentini, Multilayer anisotropic transfer matrix [software], GitHub repository, "
         "https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix (accessed 2026-04-09)"
     )

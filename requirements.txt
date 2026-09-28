@@ -3,4 +3,4 @@ scipy>=1.10
 matplotlib>=3.7
 streamlit>=1.32
 plotly>=5.20
-pyGTM @ git+https://github.com/pyMatJ/pyGTM.git@7a228b7314ea66ae025ff346c0d0e8bfb86cc82c
+materials-library @ git+https://github.com/vicentini-edoardo/Materials_Library.git@bea7ff1f3047a744238e6ed5db6790610ee47c27

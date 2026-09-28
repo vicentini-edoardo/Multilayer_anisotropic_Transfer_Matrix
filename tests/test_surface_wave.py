@@ -9,8 +9,8 @@ from multilayer_atm.models import LayerSpec, StackSpec
 
 def test_isofrequency_retains_phase_and_fallback_rotation(monkeypatch):
     stack = StackSpec.from_layers([
-        LayerSpec("air", 0.0), LayerSpec("hBN", 100e-9, (10.0, 30.0, 20.0)),
-        LayerSpec("air", 0.0),
+        LayerSpec("vacuum", 0.0), LayerSpec("hBN", 100e-9, (10.0, 30.0, 20.0)),
+        LayerSpec("vacuum", 0.0),
     ])
     params = dict(w0=800.0, kx_min=100.0, kx_max=5000.0, nk=12, nphi=8, fast=True)
     phi, k, im = solver.compute_isofreq_map(stack, workers=1, **params)

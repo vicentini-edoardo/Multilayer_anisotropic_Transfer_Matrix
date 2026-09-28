@@ -1,15 +1,8 @@
-"""Self-contained data containers and constants for the transfer-matrix engine.
+"""Layer and system containers for the transfer-matrix engine.
 
-These replace the ``Layer`` / ``System`` objects that used to come from
-``pyGTM`` (``GTM.GTMcore``). They are pure data holders plus the frequency- and
-orientation-dependent permittivity tensor construction; all of the numerical
-transfer-matrix work lives in :mod:`multilayer_atm.solver_fast`.
-
-The Euler-rotation matrix and the lab-frame permittivity construction are ported
-verbatim from the Passler & Paarmann (2017) formalism (matching the original
-pyGTM implementation), so results are numerically identical to the pyGTM backend.
-pyGTM is no longer imported at runtime by the engine; it is kept only as an
-optional validation reference for the test suite.
+These construct frequency- and orientation-dependent permittivity tensors.
+The numerical transfer-matrix work lives in :mod:`multilayer_atm.solver_fast`.
+Euler rotation follows the Passler and Paarmann (2017) formalism.
 """
 
 from __future__ import annotations
@@ -18,8 +11,7 @@ from typing import Callable, List, Optional
 
 import numpy as np
 
-# Physical constant and mode-sorting thresholds (mirror the values previously
-# taken from GTM.GTMcore so branch decisions are identical).
+# Physical constant and mode-sorting thresholds shared with solver_fast.
 C_CONST = 299792458.0  # speed of light, m/s
 QSD_THR = 1e-10  # threshold for wavevector (birefringence) comparison
 ZERO_THR = 1e-10  # threshold for eigenvalue clean-up
