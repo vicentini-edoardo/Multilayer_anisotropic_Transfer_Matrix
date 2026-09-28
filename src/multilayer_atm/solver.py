@@ -268,7 +268,7 @@ def _run_parallel_rows(
         for done, (i, w, phi_off) in enumerate(tasks, start=1):
             system = system_cache.get(phi_off)
             if system is None:
-                local_stack = stack_spec.with_interior_alpha_offset(phi_off) if phi_off != 0.0 else stack_spec
+                local_stack = stack_spec.with_interior_gamma_offset(phi_off) if phi_off != 0.0 else stack_spec
                 system = _build_system(local_stack, custom_materials=payload.get("custom_materials", {}))
                 system_cache[phi_off] = system
             out[i, :] = _compute_row(system, w, kx_array, fast)
@@ -348,11 +348,14 @@ def compute_isofreq_map(
     progress: ProgressCallback = None,
     custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
     fast: bool = False,
+    return_complex: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute Im(rpp) on a regular isofrequency grid in (phi, kx).
 
     When ``fast`` is set the vectorised per-row solver is used; it is numerically
     identical to the default per-point solver but markedly faster on dense grids.
+    ``return_complex=True`` retains the complex rpp samples for coherent field
+    reconstruction, while the default continues to return Im(rpp).
     """
     stack = stack_spec.enforce_boundary_layers()
     stack.validate()
@@ -388,7 +391,19 @@ def compute_isofreq_map(
             if progress:
                 progress((i + 1) / len(phi_values), f"Computing isofrequency Im(rpp): {i + 1}/{len(phi_values)} angles")
 
-    return phi_values, kx_values, np.imag(rpp)
+    return phi_values, kx_values, rpp if return_complex else np.imag(rpp)
+
+
+def surface_wave_permittivity(
+    stack_spec: StackSpec, w0: float,
+    custom_materials: Mapping[str, Mapping[str, Any]] | None = None,
+) -> complex:
+    """Return the isotropic superstrate permittivity for the dipole Green function."""
+    layer = _build_layer(stack_spec.layers[0], custom_materials=custom_materials)
+    epsilon = layer.calculate_epsilon(float(w0) * CM1_TO_HZ)
+    if not layer.is_isotropic:
+        raise ValueError("The dipole wave map requires an isotropic superstrate.")
+    return complex(epsilon[0, 0])
 
 
 def _run_parallel_modes(

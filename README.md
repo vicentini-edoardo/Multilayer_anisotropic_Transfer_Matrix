@@ -20,6 +20,7 @@ The implementation is based on the generalized 4×4 formalism described by Passl
 - Add optional Drude terms to any layer, including boundary media
 - Compute `Im(rpp)` maps as a function of `(w, kx)`
 - Compute isofrequency polar maps as a function of `(phi, kx)`
+- Reconstruct a vertical-dipole surface-wave intensity map below the isofrequency plot, without pole finding
 - Preview the stack geometry in a compact pseudo-3D scientific view
 - Export computed data and publication-friendly plot images
 
@@ -60,6 +61,25 @@ If you only want to use the public deployment, open:
 5. Set the frequency and momentum sampling ranges
 6. Run the computation and inspect the plot
 7. Export the resulting data or plot image
+
+After a full 360° isofrequency run, the second plot shows normalized scattered
+`|Ez(x,y)|²` for a vertical electric dipole at the origin. Adjust the source and
+observation heights, view half-width, Fourier grid, and linear/dB display below
+the polar plot. Heights are measured above the top interface; the default
+observation plane is the superstrate side of that interface. Old results must be
+recomputed to retain the complex response.
+
+The calculation numerically Fourier-transforms the sampled complex `rpp`, weighted
+by the vertical-dipole Weyl spectrum
+`K_parallel²/Kz * exp(i Kz (source_height + observation_height))` (see the
+[reflected Green-function formulation](https://doi.org/10.1515/nanoph-2023-0423)).
+It uses the evanescent part of the sampled momentum band and requires an isotropic,
+lossless dielectric superstrate such as air. It includes nonresonant evanescent
+background; it is a field-intensity proxy, not absolute power or energy flux.
+Refine `Nk`, `Nphi`, and the Fourier grid, and extend the momentum band to check
+convergence and reduce truncation ringing and periodic FFT artifacts. The view
+uses the central half of the FFT domain. The wave plot's camera button exports its
+image; the existing export toolbar continues to export the isofrequency data.
 
 ## Built-in presets
 

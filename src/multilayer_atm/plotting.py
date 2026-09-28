@@ -287,6 +287,7 @@ def plot_heatmap_interactive(
     zmin: float | None = None,
     zmax: float | None = None,
     mode_overlay: dict[str, np.ndarray] | None = None,
+    colorbar_title: str = "Im(rpp)",
 ):
     """Render an interactive Plotly dispersion heatmap for the Streamlit UI."""
     import plotly.graph_objects as go
@@ -304,7 +305,7 @@ def plot_heatmap_interactive(
                 zmin=zmin,
                 zmax=zmax,
                 colorbar=dict(
-                    title="Im(rpp)",
+                    title=colorbar_title,
                     x=1.03,
                     y=0.5,
                     len=0.88,

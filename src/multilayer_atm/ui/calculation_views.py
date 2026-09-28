@@ -18,7 +18,8 @@ from ..plotting import (
     plot_polar_isofrequency,
     plot_polar_isofrequency_interactive,
 )
-from ..solver import compute_isofreq_map, compute_mode_dispersion, compute_rpp_map
+from ..solver import compute_isofreq_map, compute_mode_dispersion, compute_rpp_map, surface_wave_permittivity
+from ..surface_wave import compute_surface_wave
 from .layer_builder import build_stack_from_session
 from .material_builder import custom_material_registry
 from ..models import StackSpec
@@ -63,6 +64,11 @@ CALC_UI_STATE_KEYS = (
     "show_mode_trace",
     "map_state",
     "iso_state",
+    "wave_source_height_nm",
+    "wave_observation_height_nm",
+    "wave_half_width_um",
+    "wave_fft_size",
+    "wave_log_intensity",
 )
 
 def _initial_calc_defaults(speed_presets: Mapping[str, Mapping[str, Mapping[str, int]]]) -> Dict[str, Any]:
@@ -80,6 +86,11 @@ def _initial_calc_defaults(speed_presets: Mapping[str, Mapping[str, Mapping[str,
         "show_peak_dots": True,
         "peak_dot_threshold_percent": 10.0,
         "show_mode_trace": False,
+        "wave_source_height_nm": 25.0,
+        "wave_observation_height_nm": 0.0,
+        "wave_half_width_um": 5.0,
+        "wave_fft_size": 1024,
+        "wave_log_intensity": True,
         "plot_refresh_nonce": 0,
         "compute_state": "Idle",
         "last_compute_signature": None,
@@ -663,13 +674,26 @@ def _append_map_history(wv: np.ndarray, kxv: np.ndarray, im_rpp: np.ndarray) -> 
     st.session_state.selected_map_history_id = str(entry["id"])
 
 
-def _append_iso_history(phiv: np.ndarray, kxv: np.ndarray, im_rpp: np.ndarray) -> None:
+def _append_iso_history(phiv: np.ndarray, kxv: np.ndarray, rpp: np.ndarray) -> None:
+    w0 = float(_mode_state("iso")["w0"])
+    epsilon_superstrate = None
+    wave_error = None
+    try:
+        epsilon_superstrate = surface_wave_permittivity(
+            build_stack_from_session(), w0, custom_materials=custom_material_registry(),
+        )
+    except ValueError as exc:
+        wave_error = str(exc)
     entry = {
         "id": _next_history_id("iso"),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "resolution": str(st.session_state.get("iso_resolution_choice", "Normal")),
         "stack_summary": _stack_history_summary("iso"),
-        "payload": (np.asarray(phiv, dtype=float), np.asarray(kxv, dtype=float), np.asarray(im_rpp, dtype=float)),
+        "payload": (np.asarray(phiv, dtype=float), np.asarray(kxv, dtype=float), np.imag(rpp)),
+        "rpp": np.asarray(rpp, dtype=complex),
+        "w0_cm1": w0,
+        "epsilon_superstrate": epsilon_superstrate,
+        "wave_error": wave_error,
     }
     st.session_state.iso_history.append(entry)
     st.session_state.selected_iso_history_id = str(entry["id"])
@@ -1050,7 +1074,7 @@ def _execute_active_compute(workers: int) -> None:
         return
 
     iso_state = _mode_state("iso")
-    phiv, kxv, im_rpp = _run_with_progress(
+    phiv, kxv, rpp = _run_with_progress(
         start_message="Preparing isofrequency computation...",
         complete_message="Isofrequency computation complete",
         compute_fn=lambda progress_cb: compute_isofreq_map(
@@ -1067,9 +1091,10 @@ def _execute_active_compute(workers: int) -> None:
             progress=progress_cb,
             custom_materials=custom_material_registry(),
             fast=fast,
+            return_complex=True,
         ),
     )
-    _append_iso_history(phiv, kxv, im_rpp)
+    _append_iso_history(phiv, kxv, rpp)
     _sync_selected_history_result("iso")
     _store_compute_snapshot("Isofrequency surface")
 
@@ -1406,6 +1431,81 @@ def _render_iso_plot(resolution_name: str, workers: int) -> None:
     )
     if preview_caption:
         st.caption(preview_caption)
+    _render_surface_wave_plot()
+
+
+def _render_surface_wave_plot() -> None:
+    """Reconstruct the wave from the selected run, independently of edited inputs."""
+    st.divider()
+    st.markdown("**Surface polariton wave — vertical dipole**")
+    selected_id = st.session_state.get("selected_iso_history_id")
+    entry = next((item for item in st.session_state.iso_history if item["id"] == selected_id), None)
+    if entry is None or "rpp" not in entry:
+        st.info("Recompute isofrequency to save the complex response for the wave map.")
+        return
+    if entry.get("wave_error"):
+        st.info(entry["wave_error"])
+        return
+    cols = st.columns(4)
+    with cols[0]:
+        st.number_input("Source height (nm)", min_value=0.0, step=5.0, key="wave_source_height_nm")
+    with cols[1]:
+        st.number_input("Observation height (nm)", min_value=0.0, step=5.0, key="wave_observation_height_nm")
+    with cols[2]:
+        st.number_input("View half-width (µm)", min_value=0.1, step=1.0, key="wave_half_width_um")
+    with cols[3]:
+        st.selectbox("Fourier grid", [512, 1024, 2048], key="wave_fft_size")
+    log_intensity = st.checkbox("Log intensity (dB)", key="wave_log_intensity")
+    phi, k, _ = entry["payload"]
+    try:
+        xy, _, intensity = compute_surface_wave(
+            phi, k, entry["rpp"], w0_cm1=entry["w0_cm1"],
+            source_height_nm=float(st.session_state.wave_source_height_nm),
+            observation_height_nm=float(st.session_state.wave_observation_height_nm),
+            epsilon_superstrate=entry["epsilon_superstrate"],
+            fft_size=int(st.session_state.wave_fft_size),
+        )
+    except ValueError as exc:
+        st.info(str(exc))
+        return
+    half_width = float(st.session_state.wave_half_width_um)
+    # Show the central half of the periodic FFT domain to keep its edges out of view.
+    safe_half_width = abs(xy[0]) / 2
+    if half_width > safe_half_width:
+        st.info(f"View limited to ±{safe_half_width:.2f} µm. Increase the Fourier grid for a larger view.")
+        half_width = safe_half_width
+    keep = np.abs(xy) <= half_width
+    if np.count_nonzero(keep) < 3:
+        st.info("Increase the view half-width or the isofrequency maximum momentum to resolve the view.")
+        return
+    shown = intensity[np.ix_(keep, keep)]
+    if not np.any(intensity):
+        st.info("No evanescent response in the sampled momentum band; extend the isofrequency range.")
+    colorbar = "Normalized |Ez|²"
+    if log_intensity:
+        shown = 10 * np.log10(np.maximum(shown, 1e-8))
+        colorbar = "Intensity (dB)"
+    fig = plot_heatmap_interactive(
+        xy[keep], xy[keep], shown,
+        xlabel="x (µm)", ylabel="y (µm)", title="Surface-wave intensity |Ez|²",
+        cmap=PLOT_COLORMAPS[str(st.session_state.get("plot_colormap", "Magma"))],
+        height=510, zmin=-60.0 if log_intensity else 0.0,
+        zmax=0.0 if log_intensity else 1.0, colorbar_title=colorbar,
+    )
+    fig.update_traces(hovertemplate="x=%{x:.3f} µm<br>y=%{y:.3f} µm<br>Intensity=%{z:.4g}<extra></extra>")
+    fig.update_yaxes(scaleanchor="x", scaleratio=1, constrain="domain")
+    fig.update_xaxes(constrain="domain")
+    fig.add_scatter(x=[0], y=[0], mode="markers", marker=dict(symbol="x", size=8, color="#39d5ff"),
+                    name="Dipole", hovertemplate="Dipole at (0, 0)<extra></extra>")
+    st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG,
+                    key=f"wave_plot_{st.session_state.get('plot_refresh_nonce', 0)}")
+    period = len(xy) * (xy[1] - xy[0])
+    st.caption(
+        f"Saved run: {entry['w0_cm1']:.1f} cm⁻¹. Normalized evanescent scattered |Ez|²; "
+        "includes nonresonant background and excludes the direct source field. "
+        f"Fourier period: {period:.1f} µm. Refine Nk, Nphi and the Fourier grid, and extend "
+        "the momentum range to check convergence."
+    )
 
 
 def _render_metadata_tab() -> None:
