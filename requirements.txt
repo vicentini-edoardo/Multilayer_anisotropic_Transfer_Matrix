@@ -1,0 +1,6 @@
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+streamlit>=1.48
+plotly>=5.20
+materials-library @ git+https://github.com/vicentini-edoardo/Materials_Library.git@71976a3a46d91e4f44b1af3804815994d70f5523

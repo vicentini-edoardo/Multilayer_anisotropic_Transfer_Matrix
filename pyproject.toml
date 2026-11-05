@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multilayer-atm"
+version = "0.1.0"
+description = "Scientific Streamlit workspace for multilayer anisotropic transfer-matrix calculations."
+readme = "README.md"
+keywords = ["transfer matrix", "anisotropic", "multilayer", "polaritons", "optics"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering :: Physics",
+]
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+  {name = "Edoardo Vicentini"},
+]
+dependencies = [
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "matplotlib>=3.7",
+  "streamlit>=1.48",
+  "plotly>=5.20",
+  "materials-library @ git+https://github.com/vicentini-edoardo/Materials_Library.git@71976a3a46d91e4f44b1af3804815994d70f5523",
+]
+
+[project.urls]
+Homepage = "https://vicentini-edoardo.github.io/Multilayer_anisotropic_Transfer_Matrix/"
+Application = "https://multilayeranisotropictransfermatrix-ev.streamlit.app"
+Repository = "https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix"
+Changelog = "https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

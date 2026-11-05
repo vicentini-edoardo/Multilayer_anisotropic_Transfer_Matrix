@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f7fb">
+  <title>Multilayer ATM</title>
+  <meta name="description" content="Free online calculator and Python toolkit for optical reflection, dispersion maps and polariton modes of multilayer anisotropic stacks, using the generalized 4×4 transfer-matrix formalism.">
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="canonical" href="https://vicentini-edoardo.github.io/Multilayer_anisotropic_Transfer_Matrix/">
+  <meta property="og:title" content="Multilayer ATM — Anisotropic Transfer-Matrix Calculator">
+  <meta property="og:description" content="Build a stack. Rotate the crystal axes. Map dispersion, isofrequency contours and polariton modes.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://vicentini-edoardo.github.io/Multilayer_anisotropic_Transfer_Matrix/assets/streamlit-workspace.png">
+  <style>
+    :root { color-scheme: light; --bg: #f4f7fb; --ink: #172d46; --muted: #52647a; --blue: #285eab; --line: #d3deeb; --white: #fff; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; text-underline-offset: 4px; }
+    a:focus-visible, summary:focus-visible, button:focus-visible { outline: 3px solid var(--blue); outline-offset: 6px; }
+    .skip { position: absolute; top: -80px; left: 20px; padding: 12px 20px; background: var(--white); z-index: 2; }
+    .skip:focus { top: 16px; }
+    .wrap { width: min(1200px, calc(100% - 96px)); margin-inline: auto; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 100px; border-bottom: 1px solid var(--line); }
+    .brand { display: inline-flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 750; text-decoration: none; letter-spacing: -.03em; }
+    .brand svg { width: 36px; height: 36px; color: var(--blue); }
+    nav { display: flex; align-items: center; gap: 30px; font-size: 14px; }
+    nav a { text-decoration: none; }
+    nav a:hover, .text-link:hover { color: var(--blue); }
+    .nav-source { border-bottom: 1px solid var(--ink); padding-block: 5px; }
+    .hero { padding: 72px 0 0; overflow: hidden; }
+    .intro { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 355px); align-items: center; gap: 56px; margin-bottom: 44px; }
+    .eyebrow { color: var(--blue); font-size: 13px; font-weight: 650; letter-spacing: .1em; text-transform: uppercase; margin: 0 0 22px; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1, h2, h3 { text-wrap: balance; }
+    h1 { font-size: clamp(40px, 4.8vw, 64px); line-height: 1.07; letter-spacing: -.04em; font-weight: 650; margin-bottom: 0; }
+    h1 span { display: block; color: var(--blue); }
+    .hero-copy { max-width: 355px; padding-bottom: 4px; }
+    .hero-description { max-width: 52ch; font-size: 18px; color: var(--muted); margin: 24px 0 0; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 28px; min-height: 50px; padding: 12px 22px; background: var(--blue); color: var(--white); font-size: 15px; font-weight: 600; text-decoration: none; border-radius: 6px; transition: background .2s, transform .2s; }
+    .button:hover { background: #194a91; transform: translateY(-2px); }
+    .button span { font-size: 21px; line-height: 1; transition: transform .2s; }
+    .button:hover span { transform: translateX(3px); }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .actions .button { flex: 1 1 220px; }
+    .closing .actions { width: min(100%, 470px); flex-shrink: 0; }
+    .hero-note { font-size: 12px; color: var(--muted); margin-top: 12px; }
+    .preview { margin: 0; border: 1px solid #bccdde; border-radius: 10px 10px 0 0; overflow: hidden; background: #f8fafc; }
+    .preview-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: #e7eef6; font-size: 12px; color: #435a74; }
+    .preview-bar span:first-child { display: flex; align-items: center; gap: 9px; }
+    .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
+    .preview img { display: block; width: 100%; height: auto; }
+    .caption { display: flex; justify-content: space-between; gap: 20px; padding: 14px 0 0; color: var(--muted); font-size: 12px; }
+    section { padding-block: 100px; }
+    .section-top { display: grid; grid-template-columns: 1fr 1fr; gap: 70px; align-items: start; margin-bottom: 48px; }
+    h2 { font-size: clamp(30px, 3.3vw, 44px); line-height: 1.18; letter-spacing: -.035em; font-weight: 600; margin-bottom: 20px; }
+    .section-top > p { color: var(--muted); max-width: 490px; margin-bottom: 0; padding-top: 5px; }
+    .model-list { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; }
+    .model { border-top: 1px solid var(--line); padding-top: 26px; }
+    .model-label { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--blue); font-size: 13px; margin-bottom: 16px; }
+    h3 { font-size: 23px; line-height: 1.3; letter-spacing: -.02em; margin-bottom: 13px; font-weight: 600; }
+    .model p { color: var(--muted); max-width: 49ch; margin-bottom: 20px; }
+    .formula { display: inline-block; font: 13px ui-monospace, SFMono-Regular, Consolas, monospace; background: #e7eef6; color: #264a7c; padding: 4px 10px; border-radius: 4px; margin-bottom: 18px; }
+    .text-link { display: block; font-size: 14px; font-weight: 600; transition: color .2s; }
+    .workflow { background: var(--white); border-block: 1px solid var(--line); }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 46px; list-style: none; padding: 0; margin: 44px 0 0; counter-reset: step; }
+    .steps li { counter-increment: step; border-top: 1px solid var(--line); padding-top: 22px; }
+    .steps li::before { content: "0" counter(step); display: block; font: 13px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--blue); margin-bottom: 25px; }
+    .steps h3 { font-size: 20px; }
+    .steps p { color: var(--muted); font-size: 15px; margin: 0; }
+    .research { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; }
+    .research p { color: var(--muted); max-width: 53ch; }
+    .resource-list { margin: 22px 0 0; padding: 0; list-style: none; }
+    .resource-list a { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 15px 0; border-bottom: 1px solid var(--line); text-decoration: none; font-size: 15px; transition: color .2s, padding .2s; }
+    .resource-list a:hover { color: var(--blue); padding-left: 5px; }
+    .citation { border-top: 1px solid var(--line); padding-top: 23px; }
+    .citation h3 { font-size: 20px; }
+    .citation p { font-size: 14px; }
+    .citation details { margin-top: 22px; font-size: 14px; }
+    summary { cursor: pointer; color: var(--blue); font-weight: 600; padding-block: 8px; }
+    details p { margin-top: 14px; }
+    pre { margin: 0; padding: 20px 22px; background: #0f2236; color: #dbe8f6; border-radius: 8px; font: 13.5px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-x: auto; }
+    .closing { background: var(--ink); color: var(--white); padding-block: 62px; }
+    .closing .wrap { display: flex; justify-content: space-between; align-items: center; gap: 40px; }
+    .closing h2 { font-size: clamp(28px, 3vw, 40px); margin-bottom: 10px; }
+    .closing p { color: #c4d4e5; margin-bottom: 0; }
+    .closing .button { flex-shrink: 0; background: #fff; color: var(--ink); }
+    .closing .button:hover { background: #e2ecf7; }
+    footer { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding-block: 28px; color: var(--muted); font-size: 12px; }
+    footer p { margin-bottom: 0; }
+    footer a { margin-left: 22px; }
+    @keyframes arrive { from { opacity: .4; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    .intro { animation: arrive .7s ease-out both; }
+    .preview { animation: arrive .9s ease-out both; }
+    @media (max-width: 900px) {
+      .wrap { width: calc(100% - 48px); }
+      .intro { grid-template-columns: 1fr; gap: 25px; }
+      .hero-copy { max-width: 100%; }
+      .hero-description { font-size: 16px; }
+      nav { gap: 20px; }
+      .section-top, .research { gap: 36px; }
+      .steps { gap: 26px; }
+      section { padding-block: 72px; }
+    }
+    @media (max-width: 640px) {
+      .wrap { width: calc(100% - 36px); }
+      header { min-height: 78px; gap: 12px; }
+      .brand { font-size: 16px; gap: 8px; }
+      .brand svg { width: 28px; height: 28px; }
+      nav { gap: 14px; font-size: 13px; }
+      nav .desktop-link { display: none; }
+      .hero { padding-top: 42px; }
+      .intro { display: block; margin-bottom: 30px; }
+      .eyebrow { font-size: 11px; margin-bottom: 18px; }
+      h1 { font-size: clamp(36px, 10vw, 58px); }
+      .hero-copy { max-width: 100%; margin-top: 25px; }
+      .preview-bar { padding: 10px 12px; font-size: 10px; }
+      .preview-bar > span:last-child, .caption > span:last-child { display: none; }
+      .caption { font-size: 11px; }
+      .section-top, .model-list, .research, .steps { grid-template-columns: 1fr; gap: 30px; }
+      .section-top { margin-bottom: 30px; gap: 5px; }
+      section { padding-block: 56px; }
+      .steps { margin-top: 30px; }
+      .steps li::before { margin-bottom: 15px; }
+      .closing { padding-block: 44px; }
+      .closing .wrap { align-items: flex-start; flex-direction: column; gap: 25px; }
+      footer { align-items: flex-start; flex-direction: column; gap: 12px; }
+      footer a { margin: 0 20px 0 0; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="wrap">
+    <a class="brand" href="#" aria-label="Multilayer ATM home">
+      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="m2 10 14-7 14 7-14 7Z M2 16l14 7 14-7 M2 22l14 7 14-7"/></svg>
+      Multilayer ATM
+    </a>
+    <nav aria-label="Main navigation">
+      <a class="desktop-link" href="#capabilities">Capabilities</a>
+      <a class="desktop-link" href="#workflow">Workflow</a>
+      <a class="desktop-link" href="#resources">Resources</a>
+      <a class="nav-source" href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+  <main id="main">
+    <div class="hero">
+      <div class="wrap">
+        <div class="intro">
+          <div>
+            <p class="eyebrow">Anisotropic multilayer optics</p>
+            <h1>Multilayer ATM<br><span>Transfer-Matrix Calculator</span></h1>
+            <p class="hero-description">From your stack to its polariton modes. Build anisotropic multilayers, rotate the crystal axes, and map the optical response with the generalized 4×4 transfer-matrix method.</p>
+          </div>
+          <div class="hero-copy">
+            <div class="actions">
+              <a class="button" href="https://multilayeranisotropictransfermatrix-ev.streamlit.app">Open the app <span aria-hidden="true">↗</span></a>
+              <a class="button" href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/archive/refs/heads/main.zip">Download locally <span aria-hidden="true">↓</span></a>
+            </div>
+            <div class="hero-note">The web app is slower than a local run. For dense grids, download and run it locally.</div>
+            <div class="hero-note">Free web app · Open-source Python toolkit · MIT licensed</div>
+          </div>
+        </div>
+        <figure class="preview">
+          <div class="preview-bar" aria-hidden="true"><span><i class="status-dot"></i> Multilayer ATM workspace</span><span>Build. Calculate. Explore.</span></div>
+          <img src="assets/streamlit-workspace.png" width="1731" height="950" fetchpriority="high" alt="Multilayer ATM workspace showing a vacuum–SiC3C–silicon stack, computed dispersion and isofrequency maps, and real-space field plots.">
+        </figure>
+        <div class="caption"><span>A look inside the app: vacuum / MoO₃ / SiC / Si, isofrequency map.</span><span>Runs in your browser. No installation needed.</span></div>
+      </div>
+    </div>
+
+    <section id="capabilities" class="wrap" aria-labelledby="cap-title">
+      <div class="section-top">
+        <h2 id="cap-title">One stack.<br>Four ways to explore.</h2>
+        <p>Compute the p-polarised reflection r<sub>pp</sub> of layered media with arbitrary crystal orientation (Passler &amp; Paarmann, 2017) and follow it from momentum space to real space.</p>
+      </div>
+      <div class="model-list">
+        <article class="model">
+          <div class="model-label">Dispersion maps</div>
+          <h3>Im(r<sub>pp</sub>) versus ω and k<sub>x</sub>.</h3>
+          <span class="formula">ω × k<sub>x</sub> → Im(r<sub>pp</sub>)</span>
+          <p>Resolve polariton branches across frequency and in-plane wavevector for your layered system.</p>
+          <a class="text-link" href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/blob/main/docs/user-guide.md">Read the user guide <span aria-hidden="true">↗</span></a>
+        </article>
+        <article class="model">
+          <div class="model-label">Isofrequency maps</div>
+          <h3>Directional response at fixed ω.</h3>
+          <span class="formula">φ × k<sub>x</sub> at fixed ω</span>
+          <p>Sweep the in-plane azimuth to reveal hyperbolic and elliptical contours of anisotropic crystals.</p>
+          <a class="text-link" href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/blob/main/docs/theory.md">Theory &amp; conventions <span aria-hidden="true">↗</span></a>
+        </article>
+        <article class="model">
+          <div class="model-label">Complex mode tracing</div>
+          <h3>Follow the poles of r<sub>pp</sub>.</h3>
+          <span class="formula">1 / r<sub>pp</sub> → 0</span>
+          <p>Track the complex wavevector of each mode and overlay Re(k<sub>x</sub>) on the dispersion map.</p>
+          <a class="text-link" href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/blob/main/docs/python-api.md">Python API <span aria-hidden="true">↗</span></a>
+        </article>
+        <article class="model">
+          <div class="model-label">Surface-wave fields</div>
+          <h3>From momentum space to real space.</h3>
+          <span class="formula">vertical dipole · 360° sweep</span>
+          <p>Visualise normalized near-field intensity from a full isofrequency sweep. A band-limited estimate: check sampling convergence.</p>
+          <a class="text-link" href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/blob/main/docs/materials.md">Materials catalog <span aria-hidden="true">↗</span></a>
+        </article>
+      </div>
+    </section>
+
+    <section id="workflow" class="workflow" aria-labelledby="workflow-title">
+      <div class="wrap">
+        <div class="section-top">
+          <h2 id="workflow-title">From structure to spectrum.</h2>
+          <p>Work in the web app for interactive calculations, or call the in-house vectorized solver from your own scripts and notebooks.</p>
+        </div>
+        <ol class="steps">
+          <li><h3>Build the stack</h3><p>Combine finite layers between semi-infinite boundaries. Set thickness and independent z–x–z Euler orientations for each layer.</p></li>
+          <li><h3>Choose the materials</h3><p>Use the shared Materials Library, or define custom Lorentz and tabulated permittivities. Add an optional Drude term per layer.</p></li>
+          <li><h3>Calculate and export</h3><p>Inspect interactive plots, export figures as PNG, and download CSV data for your own analysis.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="resources" class="wrap research" aria-labelledby="resources-title">
+      <div>
+        <h2 id="resources-title">Open tools.<br>Reproducible calculations.</h2>
+        <p>Run locally or use the solver as a Python package. Batched NumPy with process-level parallelism, no separate numerical engine required.</p>
+        <pre><code>git clone https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix.git
+cd Multilayer_anisotropic_Transfer_Matrix
+python -m pip install -e .
+python -m streamlit run app.py</code></pre>
+        <ul class="resource-list">
+          <li><a href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/blob/main/docs/install-guide.md">Install guide <span aria-hidden="true">↗</span></a></li>
+          <li><a href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/blob/main/docs/user-guide.md">User guide <span aria-hidden="true">↗</span></a></li>
+          <li><a href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/blob/main/docs/python-api.md">Python API <span aria-hidden="true">↗</span></a></li>
+          <li><a href="https://github.com/vicentini-edoardo/Materials_Library">Browse the Materials Library <span aria-hidden="true">↗</span></a></li>
+        </ul>
+      </div>
+      <div class="citation">
+        <h3>Using it in your research?</h3>
+        <p>Please cite the software version you used, together with the underlying formalism. The model assumes flat, laterally homogeneous layers with diagonal permittivity in each material’s principal frame.</p>
+        <details open>
+          <summary>Software reference</summary>
+          <p>E. Vicentini. <em>Multilayer anisotropic transfer matrix</em> (Version 0.1.0) [Computer software]. Zenodo, <a href="https://doi.org/10.5281/zenodo.XXXXXXX">doi:10.5281/zenodo.XXXXXXX</a> <!-- TODO: replace XXXXXXX with the Zenodo DOI -->.<br><a href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/blob/main/CITATION.cff">CITATION.cff</a></p>
+        </details>
+        <details open>
+          <summary>Formalism reference</summary>
+          <p>N. C. Passler and A. Paarmann. “Generalized 4×4 matrix formalism for light propagation in anisotropic stratified media.” <em>J. Opt. Soc. Am. B</em> 34, 2128 (2017).<br><a href="https://doi.org/10.1364/JOSAB.34.002128">doi:10.1364/JOSAB.34.002128</a></p>
+        </details>
+      </div>
+    </section>
+
+    <section class="closing" aria-labelledby="closing-title">
+      <div class="wrap">
+        <div><h2 id="closing-title">Explore your stack’s modes.</h2><p>Start with a layer. Discover a polariton.</p></div>
+        <div class="actions">
+          <a class="button" href="https://multilayeranisotropictransfermatrix-ev.streamlit.app">Open the app <span aria-hidden="true">↗</span></a>
+          <a class="button" href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/archive/refs/heads/main.zip">Download locally <span aria-hidden="true">↓</span></a>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="wrap">
+    <p>Developed by Edoardo Vicentini (CIC nanoGUNE)</p>
+    <div><a href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix">Source code</a><a href="https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/blob/main/LICENSE">MIT license</a></div>
+  </footer>
+</body>
+</html>

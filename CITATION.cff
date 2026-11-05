@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+title: "Multilayer anisotropic transfer matrix"
+message: "If you use this software, please cite it together with the underlying scientific work. Cite the version-specific Zenodo DOI of the release you used."
+type: software
+version: "0.1.0"
+date-released: "2026-11-05"
+authors:
+  - family-names: "Vicentini"
+    given-names: "Edoardo"
+    orcid: "https://orcid.org/0000-0003-1850-2327"
+    affiliation: "CIC nanoGUNE"
+repository-code: "https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix"
+url: "https://multilayeranisotropictransfermatrix-ev.streamlit.app"
+# TODO after Zenodo release: doi: "10.5281/zenodo.XXXXXXX"
+license: MIT
+abstract: "Python package and Streamlit app computing the optical reflection of multilayer anisotropic stacks with the generalized 4x4 transfer-matrix formalism: dispersion and isofrequency maps of Im(rpp), polariton mode traces, and vertical-dipole surface-wave maps."
+keywords:
+  - transfer-matrix method
+  - anisotropic media
+  - multilayer optics
+  - phonon polaritons
+  - nano-optics
+  - Streamlit
+preferred-citation:
+  type: article
+  authors:
+    - family-names: "Passler"
+      given-names: "N. C."
+    - family-names: "Paarmann"
+      given-names: "A."
+  title: "Generalized 4 × 4 matrix formalism for light propagation in anisotropic stratified media: study of surface phonon polaritons in polar dielectric heterostructures"
+  journal: "Journal of the Optical Society of America B"
+  volume: 34
+  issue: 10
+  start: 2128
+  year: 2017
+  doi: "10.1364/JOSAB.34.002128"

@@ -1,0 +1,33 @@
+{
+  "title": "Multilayer anisotropic transfer matrix",
+  "upload_type": "software",
+  "description": "<p>Python package and Streamlit app computing the optical reflection of multilayer anisotropic stacks with the generalized 4&times;4 transfer-matrix formalism of Passler &amp; Paarmann (2017). Provides dispersion and isofrequency maps of Im(r<sub>pp</sub>), polariton mode traces (poles of r<sub>pp</sub>), and vertical-dipole surface-wave maps, with built-in and custom isotropic/anisotropic materials.</p>",
+  "creators": [
+    {
+      "name": "Vicentini, Edoardo",
+      "orcid": "0000-0003-1850-2327",
+      "affiliation": "CIC nanoGUNE"
+    }
+  ],
+  "license": "MIT",
+  "access_right": "open",
+  "keywords": [
+    "transfer-matrix method",
+    "anisotropic media",
+    "multilayer optics",
+    "phonon polaritons",
+    "nano-optics"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    },
+    {
+      "identifier": "10.1364/JOSAB.34.002128",
+      "relation": "isDerivedFrom",
+      "scheme": "doi"
+    }
+  ]
+}
