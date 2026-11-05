@@ -11,7 +11,7 @@ A Python package and [Streamlit](https://streamlit.io) app for the optical refle
 
 **Project website:** [vicentini-edoardo.github.io/Multilayer_anisotropic_Transfer_Matrix](https://vicentini-edoardo.github.io/Multilayer_anisotropic_Transfer_Matrix/)
 
-![Application workspace](assets/figures/streamlit-workspace.png)
+![Application workspace](docs/assets/streamlit-workspace.png)
 
 ## Features
 
