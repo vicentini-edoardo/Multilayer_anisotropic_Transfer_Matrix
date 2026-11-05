@@ -18,7 +18,7 @@ Zenodo archives each GitHub *release* and mints a DOI. Metadata comes from [`.ze
    gh release create v0.1.0 --title "v0.1.0" --notes-file CHANGELOG.md
    ```
 5. Zenodo builds the record within minutes. It creates a concept DOI (all versions) and a version DOI.
-6. Replace the `XXXXXXX` DOI placeholder in a follow-up commit. Find every spot with `grep -rn XXXXXXX .`: `README.md` (badge and citation), `docs/index.html`, `src/multilayer_atm/ui/theme_layout.py` (`ZENODO_DOI_URL`), and `CITATION.cff` (uncomment the `doi:` key).
+6. The concept DOI (all versions) is `10.5281/zenodo.23981616`; it is already in `README.md`, `docs/index.html`, `CITATION.cff` and `ZENODO_DOI_URL` in `src/multilayer_atm/ui/theme_layout.py`. Add the version DOI of each new release to `CHANGELOG.md` if wanted.
 
 ## Notes
 

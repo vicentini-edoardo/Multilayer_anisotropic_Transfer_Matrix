@@ -11,7 +11,7 @@ authors:
     affiliation: "CIC nanoGUNE"
 repository-code: "https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix"
 url: "https://multilayeranisotropictransfermatrix-ev.streamlit.app"
-# TODO after Zenodo release: doi: "10.5281/zenodo.XXXXXXX"
+doi: "10.5281/zenodo.23981616"
 license: MIT
 abstract: "Python package and Streamlit app computing the optical reflection of multilayer anisotropic stacks with the generalized 4x4 transfer-matrix formalism: dispersion and isofrequency maps of Im(rpp), polariton mode traces, and vertical-dipole surface-wave maps."
 keywords:

@@ -1,7 +1,7 @@
 # Multilayer Anisotropic Transfer Matrix
 
 [![Tests](https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/actions/workflows/tests.yml/badge.svg)](https://github.com/vicentini-edoardo/Multilayer_anisotropic_Transfer_Matrix/actions/workflows/tests.yml)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23981616.svg)](https://doi.org/10.5281/zenodo.23981616)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
@@ -94,7 +94,7 @@ The project website is published from the `docs/` folder on the `main` branch. I
 
 If you use this software, please cite both the paper below and this repository (see [`CITATION.cff`](CITATION.cff); each tagged release is archived on Zenodo, which provides a version-specific DOI).
 
-> Software: E. Vicentini, *Multilayer anisotropic transfer matrix* (v0.1.0), Zenodo, [doi:10.5281/zenodo.XXXXXXX](https://doi.org/10.5281/zenodo.XXXXXXX) <!-- TODO: replace XXXXXXX with the Zenodo DOI -->
+> Software: E. Vicentini, *Multilayer anisotropic transfer matrix* (all versions), Zenodo, [doi:10.5281/zenodo.23981616](https://doi.org/10.5281/zenodo.23981616)
 
 > N. C. Passler and A. Paarmann, “Generalized 4 × 4 matrix formalism for light propagation in anisotropic stratified media: study of surface phonon polaritons in polar dielectric heterostructures,” *J. Opt. Soc. Am. B* **34**(10), 2128 (2017). [doi:10.1364/JOSAB.34.002128](https://doi.org/10.1364/JOSAB.34.002128)
 

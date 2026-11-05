@@ -107,8 +107,7 @@ def apply_theme() -> None:
     )
 
 
-# TODO: replace XXXXXXX with the Zenodo DOI after the v0.1.0 release.
-ZENODO_DOI_URL = "https://doi.org/10.5281/zenodo.XXXXXXX"
+ZENODO_DOI_URL = "https://doi.org/10.5281/zenodo.23981616"
 
 
 def render_top_bar(status: dict[str, str] | None = None) -> None:
